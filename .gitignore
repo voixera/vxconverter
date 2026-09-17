@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+
+/target/
+/web/node_modules/
+/web/.next/
+
+*.log
+*.tmp

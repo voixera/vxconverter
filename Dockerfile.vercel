@@ -1,0 +1,53 @@
+# Multi-stage Dockerfile for VX Converter standalone fallback deployment
+FROM rust:1.80-slim-bullseye AS builder
+
+WORKDIR /usr/src/vx-converter
+
+# Install build essentials and SSL dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency manifests
+COPY Cargo.toml Cargo.lock ./
+
+# Cache dependencies
+RUN mkdir src api && \
+    echo "pub fn info() -> &'static str { \"\" }" > src/lib.rs && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > api/health.rs && \
+    echo "fn main() {}" > api/analyze.rs && \
+    echo "fn main() {}" > api/download.rs && \
+    echo "fn main() {}" > api/media.rs && \
+    echo "fn main() {}" > api/history.rs && \
+    cargo build --release --bin vx-server && \
+    rm -rf src api
+
+# Copy real source code
+COPY src ./src
+COPY api ./api
+COPY migrations ./migrations
+
+# Build the standalone Axum server binary
+RUN cargo build --release --bin vx-server
+
+# Runtime image
+FROM debian:bullseye-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/src/vx-converter/target/release/vx-server /app/vx-server
+COPY --from=builder /usr/src/vx-converter/migrations /app/migrations
+
+ENV PORT=8080
+ENV RUST_LOG=info
+
+EXPOSE 8080
+
+CMD ["/app/vx-server"]

@@ -1,0 +1,62 @@
+[package]
+name = "vx-converter"
+version = "0.1.0"
+edition = "2021"
+description = "Universal public-media analyzer and downloader"
+authors = ["VX Engine Core Team"]
+
+[lib]
+name = "vx_converter"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vx-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "health"
+path = "api/health.rs"
+
+[[bin]]
+name = "analyze"
+path = "api/analyze.rs"
+
+[[bin]]
+name = "download"
+path = "api/download.rs"
+
+[[bin]]
+name = "media"
+path = "api/media.rs"
+
+[[bin]]
+name = "history"
+path = "api/history.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1.38", features = ["full"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+scraper = "0.20"
+regex = "1.10"
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+futures-util = "0.3"
+dashmap = "6.0"
+async-trait = "0.1"
+dotenvy = "0.15"
+form_urlencoded = "1.2"
+vercel_runtime = "=1.1.2"
+
+[dev-dependencies]
+tokio-test = "0.4"
