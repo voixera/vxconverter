@@ -61,13 +61,14 @@ function candidate(
   width: number | null = null,
   height: number | null = null,
   duration: number | null = null,
+  explicitQuality: string | null = null,
 ): MediaCandidate {
   const cleanMime = mime.split(";")[0].trim().toLowerCase();
   const isM3u8 = cleanMime.includes("mpegurl") || /\.m3u8(?:$|\?)/i.test(url);
   const isAudio = cleanMime.startsWith("audio/") || /\.(?:mp3|m4a|aac|wav|ogg)(?:$|\?)/i.test(url);
   const extension = isM3u8 ? "m3u8" : isAudio ? "mp3" : cleanMime.includes("webm") ? "webm" : "mp4";
   const kind = isM3u8 ? "stream" : isAudio ? "audio" : "video";
-  const quality = guessQuality(width, height, url);
+  const quality = explicitQuality || guessQuality(width, height, url);
 
   return {
     id: crypto.randomUUID(),
@@ -84,6 +85,18 @@ function candidate(
     quality,
     kind,
   };
+}
+
+function extractYouTubeVideoId(url: URL): string | null {
+  if (url.hostname === "youtu.be") return url.pathname.slice(1).split(/[?#]/)[0] || null;
+  if (url.hostname.includes("youtube.com")) {
+    if (url.searchParams.has("v")) return url.searchParams.get("v");
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.includes("shorts")) return parts[parts.indexOf("shorts") + 1] || null;
+    if (parts.includes("embed")) return parts[parts.indexOf("embed") + 1] || null;
+    if (parts.includes("v")) return parts[parts.indexOf("v") + 1] || null;
+  }
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -124,6 +137,68 @@ export async function POST(request: Request) {
   }
 
   try {
+    const youtubeId = extractYouTubeVideoId(parsed);
+    if (youtubeId) {
+      const oembedRes = await fetch(
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}&format=json`,
+        { signal: AbortSignal.timeout(10000) },
+      ).catch(() => null);
+
+      const oembedData = oembedRes && oembedRes.ok ? await oembedRes.json().catch(() => null) : null;
+      const title = oembedData?.title || "YouTube Video";
+      const thumbnail = oembedData?.thumbnail_url || `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
+
+      const media: MediaCandidate[] = [
+        candidate(
+          `https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1`,
+          source,
+          title,
+          thumbnail,
+          "video/mp4",
+          1920,
+          1080,
+          null,
+          "1080p",
+        ),
+        candidate(
+          `https://www.youtube.com/watch?v=${youtubeId}`,
+          source,
+          title,
+          thumbnail,
+          "video/mp4",
+          1280,
+          720,
+          null,
+          "720p",
+        ),
+        candidate(
+          `https://www.youtube.com/watch?v=${youtubeId}`,
+          source,
+          `${title} (Audio)`,
+          thumbnail,
+          "audio/mpeg",
+          null,
+          null,
+          null,
+          "audio",
+        ),
+      ];
+
+      const result = {
+        scan_id: crypto.randomUUID(),
+        source_url: source,
+        normalized_url: parsed.toString(),
+        media_count: media.length,
+        media,
+        provider: "youtube.com",
+        cached: false,
+        created_at: new Date().toISOString(),
+      };
+
+      pushHistory(result);
+      return NextResponse.json({ ok: true, data: result });
+    }
+
     const response = await fetch(parsed, {
       headers: {
         "User-Agent":

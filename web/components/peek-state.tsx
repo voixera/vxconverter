@@ -29,7 +29,14 @@ export function PeekState({ media, onClose }: PeekStateProps) {
       </div>
 
       <div className="relative bg-black flex items-center justify-center min-h-[240px] max-h-[460px]">
-        {!videoFailed ? (
+        {media.media_url.includes("embed") || media.media_url.includes("youtube-nocookie.com") ? (
+          <iframe
+            src={media.media_url}
+            className="w-full h-[320px] sm:h-[400px] border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : !videoFailed ? (
           <video
             controls
             preload="metadata"
