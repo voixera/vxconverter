@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { pushHistory } from "../../../lib/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,7 +109,9 @@ export async function POST(request: Request) {
     if (!media.length) {
       return NextResponse.json({ ok: false, error: { code: "MEDIA_NOT_FOUND", message: "No public media found on source page" } }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, data: { scan_id: crypto.randomUUID(), source_url: source, normalized_url: parsed.toString(), media_count: media.length, media, provider: parsed.hostname, cached: false, created_at: new Date().toISOString() } });
+    const result = { scan_id: crypto.randomUUID(), source_url: source, normalized_url: parsed.toString(), media_count: media.length, media, provider: parsed.hostname, cached: false, created_at: new Date().toISOString() };
+    pushHistory(result);
+    return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     const message = error instanceof Error && error.name === "TimeoutError" ? "Source request timed out" : "Could not inspect source URL";
     return NextResponse.json({ ok: false, error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
