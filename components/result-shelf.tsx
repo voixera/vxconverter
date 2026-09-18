@@ -5,15 +5,24 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ScanResult } from "../lib/types";
 import { MediaTile } from "./media-tile";
 import { SourcePill } from "./source-pill";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Film, Music, Radio, Layers } from "lucide-react";
 
 interface ResultShelfProps {
   result: ScanResult;
   onReset?: () => void;
 }
 
+type FilterType = "all" | "video" | "audio" | "stream";
+
+const FILTERS: { key: FilterType; label: string; icon: React.ReactNode }[] = [
+  { key: "all", label: "All", icon: <Layers className="w-3 h-3" /> },
+  { key: "video", label: "Video", icon: <Film className="w-3 h-3" /> },
+  { key: "audio", label: "Audio", icon: <Music className="w-3 h-3" /> },
+  { key: "stream", label: "Stream", icon: <Radio className="w-3 h-3" /> },
+];
+
 export function ResultShelf({ result, onReset }: ResultShelfProps) {
-  const [filter, setFilter] = useState<"all" | "video" | "audio" | "stream">("all");
+  const [filter, setFilter] = useState<FilterType>("all");
 
   const filteredMedia = result.media.filter((m) => {
     if (filter === "all") return true;
@@ -23,87 +32,82 @@ export function ResultShelf({ result, onReset }: ResultShelfProps) {
     return true;
   });
 
-  const count = result.media_count;
+  const counts = {
+    all: result.media.length,
+    video: result.media.filter((m) => m.kind === "video").length,
+    audio: result.media.filter((m) => m.kind === "audio" || m.mime.startsWith("audio/")).length,
+    stream: result.media.filter((m) => m.kind === "stream").length,
+  };
 
   return (
     <motion.section
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -16 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="w-full max-w-5xl mx-auto my-10 space-y-5"
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="w-full max-w-5xl mx-auto mb-12 space-y-5"
     >
-      {/* Top Inspector Status Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-neutral-950/90 backdrop-blur-md border border-neutral-800 rounded-lg shadow-2xl">
+      {/* Status bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl shadow-[0_4px_32px_rgba(0,0,0,0.4)]">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 font-mono text-xs text-neutral-200">
-            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-            <span className="font-semibold tracking-wider uppercase">
-              {count} {count === 1 ? "CANDIDATE DISCOVERED" : "CANDIDATES DISCOVERED"}
+          {/* Count */}
+          <div className="flex items-center gap-2 font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)] animate-pulse" />
+            <span className="text-xs font-bold tracking-widest text-white/80 uppercase">
+              {result.media_count} {result.media_count === 1 ? "candidate" : "candidates"} found
             </span>
           </div>
-          <SourcePill
-            url={result.source_url}
-            provider={result.provider}
-            cached={result.cached}
-          />
+          <SourcePill url={result.source_url} provider={result.provider} cached={result.cached} />
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Monochrome Filter Tabs */}
-          <div className="hidden sm:flex items-center gap-1 bg-black p-1 rounded border border-neutral-800 text-[11px] font-mono">
-            <button
-              onClick={() => setFilter("all")}
-              className={`px-2.5 py-1 rounded transition-colors ${
-                filter === "all" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              All ({count})
-            </button>
-            <button
-              onClick={() => setFilter("video")}
-              className={`px-2.5 py-1 rounded transition-colors ${
-                filter === "video" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              Videos
-            </button>
-            <button
-              onClick={() => setFilter("audio")}
-              className={`px-2.5 py-1 rounded transition-colors ${
-                filter === "audio" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              Audio
-            </button>
-            <button
-              onClick={() => setFilter("stream")}
-              className={`px-2.5 py-1 rounded transition-colors ${
-                filter === "stream" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
-              }`}
-            >
-              Streams
-            </button>
+          {/* Filter tabs */}
+          <div className="hidden sm:flex items-center gap-0.5 p-1 rounded-xl bg-white/[0.04] border border-white/[0.07]">
+            {FILTERS.map(({ key, label, icon }) => {
+              const count = counts[key];
+              if (key !== "all" && count === 0) return null;
+              const active = filter === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-[10px] font-medium transition-all duration-200 ${
+                    active
+                      ? "bg-white text-black shadow-sm"
+                      : "text-white/30 hover:text-white/60"
+                  }`}
+                >
+                  {icon}
+                  <span>{label}</span>
+                  <span className={`text-[9px] ${active ? "text-black/40" : "text-white/20"}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {onReset && (
-            <button
+            <motion.button
+              whileTap={{ scale: 0.95 }}
               onClick={onReset}
-              className="flex items-center gap-1 text-xs font-mono text-neutral-400 hover:text-white px-2.5 py-1.5 rounded border border-neutral-800 bg-black hover:bg-neutral-900 transition-colors"
+              className="flex items-center gap-1.5 text-[10px] font-mono text-white/25 hover:text-white/60 px-3 py-1.5 rounded-lg border border-white/[0.07] hover:bg-white/[0.05] transition-all"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>[ Clear ]</span>
-            </button>
+              <span>Clear</span>
+            </motion.button>
           )}
         </div>
       </div>
 
-      {/* Grid Layout with Stagger Animation */}
+      {/* Cards grid */}
       <motion.div
         layout
         className={`grid gap-4 ${
           filteredMedia.length === 1
-            ? "grid-cols-1 max-w-xl mx-auto"
+            ? "grid-cols-1 max-w-sm mx-auto"
+            : filteredMedia.length === 2
+            ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
             : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
         }`}
       >
@@ -112,15 +116,23 @@ export function ResultShelf({ result, onReset }: ResultShelfProps) {
             <motion.div
               key={media.id}
               layout
-              initial={{ opacity: 0, scale: 0.97, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2, delay: idx * 0.04 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={{ duration: 0.2 }}
             >
-              <MediaTile media={media} />
+              <MediaTile media={media} index={idx} />
             </motion.div>
           ))}
         </AnimatePresence>
+
+        {filteredMedia.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="col-span-full py-12 text-center font-mono text-[11px] text-white/20"
+          >
+            No {filter} candidates in this scan.
+          </motion.div>
+        )}
       </motion.div>
     </motion.section>
   );
