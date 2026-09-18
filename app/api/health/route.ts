@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET() {
+const START = Date.now();
+
+export async function GET() {
   return NextResponse.json({
     ok: true,
     data: {
-      status: "operational",
-      version: "4.0.0",
-      engine: "Engine V4 VX",
-      uptime_secs: Math.floor(process.uptime()),
+      status: "ok",
+      version: "4.0.0-vx",
+      engine: "Engine V4 VX (TypeScript)",
+      uptime_secs: Math.floor((Date.now() - START) / 1000),
     },
   });
 }

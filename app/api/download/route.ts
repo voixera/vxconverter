@@ -7,25 +7,8 @@ import { MediaValidator } from "../../../lib/engine-v4-vx/validator";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
-  let body: { media_id?: unknown; format?: unknown };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: { code: "BAD_REQUEST", message: "Invalid JSON body" } },
-      { status: 400 },
-    );
-  }
-
-  if (typeof body.media_id !== "string" || !body.media_id.trim()) {
-    return NextResponse.json(
-      { ok: false, error: { code: "BAD_REQUEST", message: "media_id is required" } },
-      { status: 400 },
-    );
-  }
-
-  const media = getMediaById(body.media_id.trim());
+async function handleDownload(mediaId: string, request: Request): Promise<Response> {
+  const media = getMediaById(mediaId);
   if (!media) {
     return NextResponse.json(
       { ok: false, error: { code: "MEDIA_NOT_FOUND", message: "Media session expired or not found. Please inspect the URL again." } },
@@ -100,7 +83,12 @@ export async function POST(request: Request) {
 
     const headers = new Headers();
     headers.set("Content-Type", detectedMime);
-    headers.set("Content-Disposition", `attachment; filename="${filename}"`);
+    // RFC 5987 encoded filename handles non-ASCII titles correctly
+    const encodedFilename = encodeURIComponent(filename);
+    headers.set(
+      "Content-Disposition",
+      `attachment; filename="${filename.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodedFilename}`,
+    );
     headers.set("Accept-Ranges", "bytes");
 
     const contentLength = upstream.headers.get("content-length");
@@ -146,4 +134,39 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+}
+
+// GET /api/download?media_id=xxx  — browser navigates directly, streams without JS buffering
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const mediaId = searchParams.get("media_id");
+  if (!mediaId || !mediaId.trim()) {
+    return NextResponse.json(
+      { ok: false, error: { code: "BAD_REQUEST", message: "media_id query param is required" } },
+      { status: 400 },
+    );
+  }
+  return handleDownload(mediaId.trim(), request);
+}
+
+// POST /api/download  { media_id, format }  — kept for backward compat
+export async function POST(request: Request) {
+  let body: { media_id?: unknown; format?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: { code: "BAD_REQUEST", message: "Invalid JSON body" } },
+      { status: 400 },
+    );
+  }
+
+  if (typeof body.media_id !== "string" || !body.media_id.trim()) {
+    return NextResponse.json(
+      { ok: false, error: { code: "BAD_REQUEST", message: "media_id is required" } },
+      { status: 400 },
+    );
+  }
+
+  return handleDownload(body.media_id.trim(), request);
 }

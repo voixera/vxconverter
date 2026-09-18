@@ -33,28 +33,18 @@ export async function fetchHistory(): Promise<ScanResult[]> {
   return payload.data || [];
 }
 
-export async function triggerDownload(mediaId: string, filename: string): Promise<void> {
-  const res = await fetch("/api/download", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ media_id: mediaId, format: "original" }),
-  });
-
-  if (!res.ok) {
-    const errPayload = await res.json().catch(() => null);
-    throw new Error(errPayload?.error?.message || `Download failed with HTTP ${res.status}`);
-  }
-
-  const blob = await res.blob();
-  const blobUrl = window.URL.createObjectURL(blob);
+/**
+ * Trigger a streaming download by navigating the browser to the GET download endpoint.
+ * No JS blob buffering — browser streams directly to disk.
+ */
+export async function triggerDownload(mediaId: string, _filename: string): Promise<void> {
+  // Use GET endpoint: browser navigates, Content-Disposition attachment triggers save dialog.
+  // File name comes from the server-side Content-Disposition header.
+  const url = `/api/download?media_id=${encodeURIComponent(mediaId)}`;
   const a = document.createElement("a");
   a.style.display = "none";
-  a.href = blobUrl;
-  a.download = filename;
+  a.href = url;
   document.body.appendChild(a);
   a.click();
-  window.URL.revokeObjectURL(blobUrl);
   document.body.removeChild(a);
 }
