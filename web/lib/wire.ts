@@ -28,7 +28,7 @@ export async function fetchHistory(): Promise<ScanResult[]> {
 type ProgressCallback = (loaded: number, total: number | null) => void;
 
 /**
- * Download media via server relay with direct fallback.
+ * Download media automatically to user's disk via server streaming relay.
  */
 export async function triggerDownload(
   mediaOrId: string | MediaCandidate,
@@ -46,21 +46,7 @@ export async function triggerDownload(
       body: JSON.stringify({ media_id: mediaId, media: mediaObj }),
     });
   } catch (netErr: any) {
-    // Network fetch to server failed — attempt direct browser download fallback
-    if (mediaObj?.media_url && mediaObj.is_direct) {
-      const a = document.createElement("a");
-      a.href = mediaObj.media_url;
-      a.download = filename;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        if (document.body.contains(a)) document.body.removeChild(a);
-      }, 1000);
-      return;
-    }
-    throw new Error(`Network error: ${netErr?.message || "Connection failed"}`);
+    throw new Error(`Download failed: ${netErr?.message || "Could not connect to relay server"}`);
   }
 
   // Error detection — server returns JSON on failure
@@ -71,24 +57,6 @@ export async function triggerDownload(
       const errPayload = await res.json();
       msg = errPayload?.error?.message || msg;
     } catch {}
-
-    // Direct fallback if server relay encountered an error
-    if (mediaObj?.media_url && mediaObj.is_direct) {
-      try {
-        const a = document.createElement("a");
-        a.href = mediaObj.media_url;
-        a.download = filename;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          if (document.body.contains(a)) document.body.removeChild(a);
-        }, 1000);
-        return;
-      } catch {}
-    }
-
     throw new Error(msg);
   }
 
@@ -100,7 +68,7 @@ export async function triggerDownload(
   const dlFilename = nameMatch ? decodeURIComponent(nameMatch[1]) : filename;
   const totalBytes = res.headers.get("content-length") ? Number(res.headers.get("content-length")) : null;
 
-  // Path A: File System Access API — true streaming to disk, zero RAM buffer
+  // Path A: File System Access API — stream directly to file on disk
   if (typeof window !== "undefined" && "showSaveFilePicker" in window && res.body) {
     try {
       const ext = dlFilename.split(".").pop() || "mp4";
@@ -124,19 +92,21 @@ export async function triggerDownload(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        await writable.write(value);
-        loaded += value.byteLength;
-        onProgress?.(loaded, totalBytes);
+        if (value && value.length > 0) {
+          await writable.write(value);
+          loaded += value.byteLength;
+          onProgress?.(loaded, totalBytes);
+        }
       }
       await writable.close();
       return;
     } catch (e: any) {
       if (e?.name === "AbortError") throw new Error("Cancelled");
-      // Fall through to blob method
+      // Fall through to memory blob stream
     }
   }
 
-  // Path B: ReadableStream accumulator → Blob → anchor click
+  // Path B: ReadableStream accumulator → local Blob URL → programmatic automatic download
   if (res.body) {
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -145,12 +115,14 @@ export async function triggerDownload(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value);
-      loaded += value.byteLength;
-      onProgress?.(loaded, totalBytes);
+      if (value && value.length > 0) {
+        chunks.push(value);
+        loaded += value.byteLength;
+        onProgress?.(loaded, totalBytes);
+      }
     }
 
-    const blob = new Blob(chunks as unknown as ArrayBuffer[], { type: ct || "application/octet-stream" });
+    const blob = new Blob(chunks as unknown as ArrayBuffer[], { type: ct || "video/mp4" });
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.style.display = "none";
@@ -161,9 +133,9 @@ export async function triggerDownload(
     setTimeout(() => {
       URL.revokeObjectURL(blobUrl);
       if (document.body.contains(a)) document.body.removeChild(a);
-    }, 10000);
+    }, 15000);
     return;
   }
 
-  throw new Error("Response body is empty");
+  throw new Error("Stream response body is empty");
 }
