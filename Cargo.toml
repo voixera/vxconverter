@@ -15,23 +15,23 @@ path = "src/main.rs"
 
 [[bin]]
 name = "health"
-path = "api/health.rs"
+path = "rust_api/health.rs"
 
 [[bin]]
 name = "analyze"
-path = "api/analyze.rs"
+path = "rust_api/analyze.rs"
 
 [[bin]]
 name = "download"
-path = "api/download.rs"
+path = "rust_api/download.rs"
 
 [[bin]]
 name = "media"
-path = "api/media.rs"
+path = "rust_api/media.rs"
 
 [[bin]]
 name = "history"
-path = "api/history.rs"
+path = "rust_api/history.rs"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }

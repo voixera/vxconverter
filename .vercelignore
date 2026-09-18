@@ -1,4 +1,4 @@
-api/
+rust_api/
 src/
 migrations/
 Cargo.toml
