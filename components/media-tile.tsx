@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { MediaCandidate } from "../lib/types";
 import { DownloadChip } from "./download-chip";
 import { PeekState } from "./peek-state";
+import { Eye, Copy, Check, Film, Music, Radio, Sparkles } from "lucide-react";
 
 interface MediaTileProps {
   media: MediaCandidate;
@@ -29,11 +30,14 @@ export function MediaTile({ media }: MediaTileProps) {
   const filename = `${(media.title || "vx-media")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "vx-media"}-${media.quality}.${media.extension}`;
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "vx-media"}-${media.quality}.${media.extension}`;
+
+  const isAudio = media.kind === "audio" || media.mime.startsWith("audio/");
+  const isStream = media.kind === "stream" || media.extension === "m3u8";
 
   const metaTokens = [
     media.extension.toUpperCase(),
-    media.mime,
     media.quality.toUpperCase(),
     media.width && media.height ? `${media.width}×${media.height}` : null,
     formatDuration(media.duration),
@@ -47,79 +51,91 @@ export function MediaTile({ media }: MediaTileProps) {
   };
 
   return (
-    <div className="flex flex-col bg-vx-surface border border-vx-border hover:border-vx-border-light transition-colors rounded overflow-hidden">
-      {/* Top Media Preview Area */}
+    <div className="flex flex-col bg-vx-surface/90 backdrop-blur border border-vx-border hover:border-vx-border-light transition-all duration-200 rounded-xl overflow-hidden shadow-lg group vx-corner-mark">
+      {/* Media Preview or Thumbnail Header */}
       {showPreview ? (
         <PeekState media={media} onClose={() => setShowPreview(false)} />
       ) : (
-        <div className="relative aspect-video bg-vx-bg flex items-center justify-center overflow-hidden group border-b border-vx-border/60">
+        <div className="relative aspect-[16/9] bg-vx-bg flex items-center justify-center overflow-hidden border-b border-vx-border">
           {media.thumbnail_url ? (
             <img
               src={media.thumbnail_url}
               alt={media.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             />
           ) : (
             <div className="flex flex-col items-center justify-center text-vx-dim p-4">
-              <svg
-                className="w-8 h-8 opacity-40 mb-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.5"
-                  d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
+              {isAudio ? (
+                <Music className="w-8 h-8 text-vx-accent opacity-60 mb-2" />
+              ) : isStream ? (
+                <Radio className="w-8 h-8 text-vx-cyan opacity-60 mb-2" />
+              ) : (
+                <Film className="w-8 h-8 text-vx-accent opacity-60 mb-2" />
+              )}
               <span className="font-mono text-[11px] text-vx-dim/70">
                 {media.mime}
               </span>
             </div>
           )}
 
+          {/* Type Badge */}
+          <div className="absolute top-2.5 left-2.5 bg-vx-bg/90 backdrop-blur-md border border-vx-border px-2 py-0.5 rounded text-[10px] font-mono text-vx-accent font-semibold tracking-wider uppercase">
+            {isAudio ? "AUDIO" : isStream ? "STREAM" : "VIDEO"}
+          </div>
+
           {/* Quality Tag Badge */}
-          <div className="absolute top-2 right-2 bg-vx-bg/90 backdrop-blur-sm border border-vx-border px-2 py-0.5 rounded text-[11px] font-mono text-vx-text">
+          <div className="absolute top-2.5 right-2.5 bg-vx-bg/90 backdrop-blur-md border border-vx-border px-2.5 py-0.5 rounded text-[10px] font-mono text-vx-text font-bold">
             {media.quality.toUpperCase()}
           </div>
         </div>
       )}
 
-      {/* Metadata & Controls Footer */}
-      <div className="p-3.5 flex flex-col justify-between flex-1 gap-3">
+      {/* Info & Actions Body */}
+      <div className="p-4 flex flex-col justify-between flex-1 gap-3.5">
         <div>
           <h3
-            className="text-sm font-medium text-vx-text line-clamp-2 title"
+            className="text-sm font-medium text-vx-text line-clamp-2 leading-snug group-hover:text-vx-accent transition-colors"
             title={media.title}
           >
             {media.title}
           </h3>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-vx-dim">
+
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-vx-dim">
             {metaTokens.map((token, i) => (
               <React.Fragment key={i}>
-                {i > 0 && <span className="opacity-40">·</span>}
-                <span>{token}</span>
+                {i > 0 && <span className="opacity-30">·</span>}
+                <span className="text-vx-dim/90">{token}</span>
               </React.Fragment>
             ))}
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-vx-border/50">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-vx-border/60">
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => setShowPreview((prev) => !prev)}
-              className="px-2.5 py-1.5 rounded text-xs font-mono text-vx-text bg-vx-subtle border border-vx-border hover:bg-vx-border/40 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-mono text-vx-text bg-vx-subtle border border-vx-border hover:bg-vx-border/60 hover:text-vx-accent transition-colors"
             >
-              {showPreview ? "[ Hide ]" : "[ Preview ]"}
+              <Eye className="w-3.5 h-3.5" />
+              <span>{showPreview ? "[ Hide ]" : "[ Preview ]"}</span>
             </button>
+
             <button
               onClick={copyUrl}
-              className="px-2 py-1.5 rounded text-xs font-mono text-vx-dim hover:text-vx-text border border-vx-border/60 hover:bg-vx-subtle transition-colors"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-mono text-vx-dim hover:text-vx-text border border-vx-border/60 hover:bg-vx-subtle transition-colors"
               title="Copy Media URL"
             >
-              {copied ? "[ Copied ]" : "[ Copy URL ]"}
+              {copied ? (
+                <>
+                  <Check className="w-3 h-3 text-vx-emerald" />
+                  <span className="text-vx-emerald">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  <span>Copy</span>
+                </>
+              )}
             </button>
           </div>
 
