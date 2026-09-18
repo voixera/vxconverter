@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for VX Converter standalone fallback deployment
-FROM rust:1.80-slim-bullseye AS builder
+FROM rust:1.80-slim-bookworm AS builder
 
 WORKDIR /usr/src/vx-converter
 
@@ -34,7 +34,7 @@ COPY migrations ./migrations
 RUN cargo build --release --bin vx-server
 
 # Runtime image
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
