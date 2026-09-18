@@ -126,15 +126,34 @@ export async function POST(request: Request) {
   try {
     const response = await fetch(parsed, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VXConverter/1.0",
-        Accept: "text/html,video/*,audio/*,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,video/*,audio/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
       },
       signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
+      const msg =
+        response.status === 404
+          ? "Source page was not found (HTTP 404). Check the URL or the media may have been removed."
+          : response.status === 403
+            ? "Source server denied access (HTTP 403). Content may be private or protected."
+            : response.status === 429
+              ? "Source server rate limited requests (HTTP 429). Try again shortly."
+              : `Source returned HTTP ${response.status}`;
       return NextResponse.json(
-        { ok: false, error: { code: "UPSTREAM_ERROR", message: `Source returned HTTP ${response.status}` } },
+        { ok: false, error: { code: "UPSTREAM_ERROR", message: msg } },
         { status: 502 },
       );
     }
