@@ -105,12 +105,12 @@ export default function HomePage() {
 
   return (
     <main className="relative min-h-screen bg-black text-neutral-100 selection:bg-white selection:text-black overflow-x-hidden font-sans">
-      {/* 1. Full-Screen Atmospheric Background Image from Top to Bottom */}
+      {/* 1. Full-Screen Atmospheric Background Image from asset folder */}
       <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden">
         <img
-          src="/hero-visual.jpg"
+          src="/asset/download (9).jpg"
           alt=""
-          className="w-full h-full object-cover filter grayscale contrast-125 brightness-[0.20] scale-105"
+          className="w-full h-full object-cover object-center opacity-35 scale-105 filter contrast-125 brightness-[0.75] blur-[0.5px]"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-black/60 to-black/95" />
         <div className="absolute inset-0 vx-grid-bg opacity-40" />

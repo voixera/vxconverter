@@ -1,4 +1,4 @@
-import { ApiResponse, ScanResult } from "./types";
+import { ApiResponse, MediaCandidate, ScanResult } from "./types";
 
 export async function analyzeUrl(url: string): Promise<ScanResult> {
   const res = await fetch("/api/analyze", {
@@ -28,25 +28,46 @@ export async function fetchHistory(): Promise<ScanResult[]> {
 type ProgressCallback = (loaded: number, total: number | null) => void;
 
 /**
- * Download media via server relay.
+ * Download media via server relay with direct fallback.
  *
  * 1. POST /api/download → server fetches + validates + streams bytes
- * 2. Check Content-Type — JSON = error, throw with message
- * 3. Chrome 86+: File System Access API (showSaveFilePicker) — true streaming,
+ * 2. Chrome 86+: File System Access API (showSaveFilePicker) — true streaming,
  *    zero RAM buffering, reports byte progress
- * 4. Fallback: ReadableStream → Uint8Array accumulator → Blob → anchor click
- *    Tracks bytes for progress even without Content-Length
+ * 3. Fallback: ReadableStream → Uint8Array accumulator → Blob → anchor click
+ * 4. Fallback on network/relay error: Direct browser download anchor trigger
  */
 export async function triggerDownload(
-  mediaId: string,
+  mediaOrId: string | MediaCandidate,
   filename: string,
   onProgress?: ProgressCallback,
 ): Promise<void> {
-  const res = await fetch("/api/download", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ media_id: mediaId }),
-  });
+  const mediaObj = typeof mediaOrId === "object" ? mediaOrId : undefined;
+  const mediaId = typeof mediaOrId === "string" ? mediaOrId : mediaOrId.id;
+
+  let res: Response;
+  try {
+    res = await fetch("/api/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ media_id: mediaId, media: mediaObj }),
+    });
+  } catch (netErr: any) {
+    // Network fetch to server failed — attempt direct browser download fallback
+    if (mediaObj?.media_url && mediaObj.is_direct) {
+      const a = document.createElement("a");
+      a.href = mediaObj.media_url;
+      a.download = filename;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+      }, 1000);
+      return;
+    }
+    throw new Error(`Network error: ${netErr?.message || "Connection failed"}`);
+  }
 
   // Error detection — server returns JSON on failure
   const ct = res.headers.get("content-type") || "";
@@ -56,6 +77,24 @@ export async function triggerDownload(
       const errPayload = await res.json();
       msg = errPayload?.error?.message || msg;
     } catch {}
+
+    // Direct fallback if server relay encountered an error
+    if (mediaObj?.media_url && mediaObj.is_direct) {
+      try {
+        const a = document.createElement("a");
+        a.href = mediaObj.media_url;
+        a.download = filename;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (document.body.contains(a)) document.body.removeChild(a);
+        }, 1000);
+        return;
+      } catch {}
+    }
+
     throw new Error(msg);
   }
 
@@ -67,13 +106,18 @@ export async function triggerDownload(
   const dlFilename = nameMatch ? decodeURIComponent(nameMatch[1]) : filename;
   const totalBytes = res.headers.get("content-length") ? Number(res.headers.get("content-length")) : null;
 
-  // Path A: File System Access API — true streaming to disk, no RAM buffer
+  // Path A: File System Access API — true streaming to disk, zero RAM buffer
   if (typeof window !== "undefined" && "showSaveFilePicker" in window && res.body) {
     try {
       const ext = dlFilename.split(".").pop() || "mp4";
       const mimeMap: Record<string, string> = {
-        mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg",
-        m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", m3u8: "application/x-mpegurl",
+        mp4: "video/mp4",
+        webm: "video/webm",
+        mp3: "audio/mpeg",
+        m4a: "audio/mp4",
+        wav: "audio/wav",
+        ogg: "audio/ogg",
+        m3u8: "application/x-mpegurl",
       };
       const handle = await (window as any).showSaveFilePicker({
         suggestedName: dlFilename,
@@ -81,19 +125,14 @@ export async function triggerDownload(
       });
       const writable = await handle.createWritable();
 
-      if (onProgress) {
-        // Pipe with progress tracking
-        const reader = res.body.getReader();
-        let loaded = 0;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          await writable.write(value);
-          loaded += value.byteLength;
-          onProgress(loaded, totalBytes);
-        }
-      } else {
-        await res.body.pipeTo(writable);
+      const reader = res.body.getReader();
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+        loaded += value.byteLength;
+        onProgress?.(loaded, totalBytes);
       }
       await writable.close();
       return;
@@ -127,7 +166,7 @@ export async function triggerDownload(
     a.click();
     setTimeout(() => {
       URL.revokeObjectURL(blobUrl);
-      document.body.removeChild(a);
+      if (document.body.contains(a)) document.body.removeChild(a);
     }, 10000);
     return;
   }

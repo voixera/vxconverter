@@ -4,15 +4,17 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Download, Loader2, AlertCircle, Check, X } from "lucide-react";
 import { triggerDownload } from "../lib/wire";
+import type { MediaCandidate } from "../lib/types";
 
 interface DownloadChipProps {
   mediaId: string;
+  media?: MediaCandidate;
   filename: string;
   filesize: number | null;
   mime: string;
 }
 
-export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChipProps) {
+export function DownloadChip({ mediaId, media, filename, filesize, mime }: DownloadChipProps) {
   const [state, setState] = useState<"idle" | "downloading" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
     setState("downloading");
 
     try {
-      await triggerDownload(mediaId, filename, (loaded, total) => {
+      await triggerDownload(media || mediaId, filename, (loaded, total) => {
         if (total) {
           const pct = Math.round((loaded / total) * 100);
           setProgress(`${pct}%`);
@@ -77,11 +79,20 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
         )}
 
         {state === "done" ? (
-          <><Check className="w-3 h-3" /><span>Saved</span></>
+          <>
+            <Check className="w-3 h-3" />
+            <span>Saved</span>
+          </>
         ) : state === "downloading" ? (
-          <><Loader2 className="w-3 h-3 animate-spin" /><span>{progress || "..."}</span></>
+          <>
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span>{progress || "..."}</span>
+          </>
         ) : state === "error" ? (
-          <><Download className="w-3 h-3" /><span>Retry</span></>
+          <>
+            <Download className="w-3 h-3" />
+            <span>Retry</span>
+          </>
         ) : (
           <>
             <Download className="w-3 h-3" />
@@ -101,7 +112,13 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
           >
             <AlertCircle className="w-3 h-3 text-red-400 shrink-0 mt-0.5" />
             <span className="font-mono text-[10px] text-red-400/80 leading-snug flex-1">{error}</span>
-            <button onClick={() => { setError(null); setState("idle"); }} className="text-red-400/40 hover:text-red-400 shrink-0 ml-1">
+            <button
+              onClick={() => {
+                setError(null);
+                setState("idle");
+              }}
+              className="text-red-400/40 hover:text-red-400 shrink-0 ml-1"
+            >
               <X className="w-2.5 h-2.5" />
             </button>
           </motion.div>

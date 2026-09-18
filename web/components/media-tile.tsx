@@ -143,6 +143,7 @@ export function MediaTile({ media }: MediaTileProps) {
 
           <DownloadChip
             mediaId={media.id}
+            media={media}
             filename={filename}
             filesize={media.filesize}
             mime={media.mime}

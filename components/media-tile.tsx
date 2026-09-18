@@ -183,7 +183,13 @@ export function MediaTile({ media, index = 0 }: MediaTileProps) {
             </motion.button>
           </div>
 
-          <DownloadChip mediaId={media.id} filename={filename} filesize={media.filesize} mime={media.mime} />
+          <DownloadChip
+            mediaId={media.id}
+            media={media}
+            filename={filename}
+            filesize={media.filesize}
+            mime={media.mime}
+          />
         </div>
       </div>
     </motion.div>

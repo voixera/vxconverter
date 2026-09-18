@@ -9,7 +9,7 @@ export class OpenGraphExtractor implements V4Extractor {
   public name = "OpenGraphExtractor";
 
   public canHandle(_url: URL): boolean {
-    return true;
+    return true; // Generic parser
   }
 
   public static parseHtml(html: string, base: URL): MediaCandidate[] {

@@ -13,7 +13,7 @@ export class GenericExtractor implements V4Extractor {
   public name = "GenericExtractor";
 
   public canHandle(_url: URL): boolean {
-    return true;
+    return true; // Always available as universal fallback
   }
 
   public async extract(ctx: EngineContext): Promise<ExtractorResult | null> {
@@ -21,6 +21,7 @@ export class GenericExtractor implements V4Extractor {
     const media: MediaCandidate[] = [];
     const seen = new Set<string>();
 
+    // 1. Direct media response check
     if (
       fetchRes.contentType.startsWith("video/") ||
       fetchRes.contentType.startsWith("audio/") ||
@@ -48,9 +49,11 @@ export class GenericExtractor implements V4Extractor {
       return { handled: true, provider: fetchRes.finalUrl.hostname, media };
     }
 
+    // 2. HTML text inspection (even if status is 403/404, check if HTML body contains media tags)
     if (fetchRes.html) {
       const html = fetchRes.html;
 
+      // Run OpenGraph, HTML5, and JSON-LD parsers
       const ogResults = OpenGraphExtractor.parseHtml(html, fetchRes.finalUrl);
       const html5Results = HTML5Extractor.parseHtml(html, fetchRes.finalUrl);
       const jsonLdResults = JsonLdExtractor.parseHtml(html, fetchRes.finalUrl);
@@ -62,6 +65,7 @@ export class GenericExtractor implements V4Extractor {
         }
       }
 
+      // 3. Fallback regex for inline .m3u8, .mp4, .webm in scripts
       const directPattern = /(https?:\/\/[^\s"'<>\\]+?\.(?:m3u8|mp4|webm|mov|mp3|m4a|aac|wav|ogg|flac)(?:\?[^\s"'<>\\]*)?)/gi;
       let match: RegExpExecArray | null;
 
@@ -111,6 +115,7 @@ export class GenericExtractor implements V4Extractor {
       return { handled: true, provider: fetchRes.finalUrl.hostname, media };
     }
 
+    // If no media found and HTTP status was an error, surface clean status error
     if (!fetchRes.ok) {
       const err = new Error(
         fetchRes.status === 404

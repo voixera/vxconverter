@@ -130,16 +130,21 @@ export default function HomePage() {
 
   return (
     <main className="relative min-h-screen bg-[#06060a] text-neutral-100 selection:bg-white selection:text-black overflow-x-hidden font-sans">
+      {/* Atmospheric Background from asset folder */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <img
+          src="/asset/download (9).jpg"
+          alt=""
+          className="w-full h-full object-cover object-center opacity-35 scale-105 filter contrast-125 brightness-[0.75] blur-[0.5px]"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#06060a]/85 via-[#06060a]/65 to-[#06060a]/95" />
+        <div className="absolute inset-0 vx-grid-bg opacity-30" />
+        <div className="absolute inset-0 vx-scanlines pointer-events-none opacity-60" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] bg-white/[0.02] rounded-full blur-[120px]" />
+      </div>
+
       {/* WebGL atmosphere */}
       <WebglBackdrop />
-
-      {/* Radial glow top */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] bg-white/[0.015] rounded-full blur-[120px]" />
-        <div className="absolute inset-0 vx-grid-bg opacity-30" />
-        {/* Subtle scanline overlay */}
-        <div className="absolute inset-0 vx-scanlines pointer-events-none" />
-      </div>
 
       <div className="relative z-10 mx-auto max-w-5xl px-4 py-6 sm:px-6">
 

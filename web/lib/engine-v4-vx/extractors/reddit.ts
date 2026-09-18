@@ -55,9 +55,15 @@ export class RedditExtractor implements V4Extractor {
 
     if (post.secure_media?.reddit_video?.fallback_url) {
       const vid = post.secure_media.reddit_video;
+      // Reddit DASH: fallback_url is video-only (no audio track).
+      // Audio lives at <base>/DASH_audio.mp4. We expose both separately.
+      // ponytail: muxing video+audio requires ffmpeg — add when server-side ffmpeg available.
+      const baseUrl = (vid.fallback_url as string).replace(/\/DASH_[^/?]+/, "");
+      const audioUrl = `${baseUrl}/DASH_audio.mp4`;
+
       media.push({
         id: crypto.randomUUID(),
-        title: `${title} (${vid.height}p)`,
+        title: `${title} (${vid.height}p, video only — no audio)`,
         source_url: ctx.rawUrl,
         media_url: vid.fallback_url,
         thumbnail_url: thumbnail,
@@ -69,6 +75,25 @@ export class RedditExtractor implements V4Extractor {
         filesize: null,
         quality: `${vid.height}p`,
         kind: "video",
+        playable: true,
+        is_direct: true,
+      });
+
+      // Audio track (separate)
+      media.push({
+        id: crypto.randomUUID(),
+        title: `${title} (Audio)`,
+        source_url: ctx.rawUrl,
+        media_url: audioUrl,
+        thumbnail_url: thumbnail,
+        mime: "audio/mp4",
+        extension: "mp4",
+        width: null,
+        height: null,
+        duration: vid.duration,
+        filesize: null,
+        quality: "audio",
+        kind: "audio",
         playable: true,
         is_direct: true,
       });
