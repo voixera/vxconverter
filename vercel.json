@@ -12,28 +12,12 @@
   ],
   "routes": [
     {
-      "src": "/api/health",
-      "dest": "api/health.rs"
-    },
-    {
-      "src": "/api/analyze",
-      "dest": "api/analyze.rs"
-    },
-    {
-      "src": "/api/download",
-      "dest": "api/download.rs"
-    },
-    {
-      "src": "/api/media/(?<id>[^/]+)",
-      "dest": "api/media.rs?id=$id"
-    },
-    {
-      "src": "/api/history",
-      "dest": "api/history.rs"
+      "src": "/logo.png",
+      "dest": "public/logo.png"
     },
     {
       "src": "/(.*)",
-      "dest": "web/$1"
+      "dest": "/web/$1"
     }
   ]
 }

@@ -18,7 +18,7 @@ export async function analyzeUrl(url: string): Promise<ScanResult> {
   }));
 
   if (!payload.ok || !payload.data) {
-    throw new Error(payload.error?.message || "Inspection failed");
+    throw new Error(payload.error?.message || `Inspection failed with HTTP ${res.status}`);
   }
 
   return payload.data;

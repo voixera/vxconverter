@@ -58,7 +58,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between border-b border-vx-border pb-5">
           <div className="flex items-center gap-3 font-mono">
-            <span className="grid h-8 w-8 place-items-center rounded bg-vx-accent font-bold text-vx-bg">VX</span>
+            <img src="/logo.png" alt="VX Converter" className="h-9 w-9 rounded object-cover" />
             <div>
               <p className="text-sm font-bold tracking-[0.2em] text-vx-text">CONVERTER</p>
               <p className="text-[10px] uppercase tracking-widest text-vx-dim">public media inspector</p>
