@@ -1,0 +1,10 @@
+api/
+src/
+migrations/
+Cargo.toml
+Cargo.lock
+Dockerfile.vercel
+target/
+.env
+.env.*
+!.env.example
