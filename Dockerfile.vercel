@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for VX Converter standalone fallback deployment
-FROM rust:1.85-slim-bookworm AS builder
+FROM rust:1.88-slim-bookworm AS builder
 
 WORKDIR /usr/src/vx-converter
 
