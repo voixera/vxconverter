@@ -65,39 +65,7 @@ export class MissavExtractor implements V4Extractor {
         if (unpacked) scriptContent = unpacked;
       }
 
-      // Match HLS playlist URLs in script
-      const m3u8Matches = scriptContent.match(/https?:\/\/[^\s"'<>\\]+?\.(?:m3u8|mp4)[^\s"'<>\\]*/gi) || [];
-      for (const m3u8 of m3u8Matches) {
-        let cleanUrl = m3u8.replace(/\\/g, "").replace(/['",;]+$/, "");
-        try {
-          cleanUrl = new URL(cleanUrl, fetchRes.finalUrl).toString();
-        } catch {
-          continue;
-        }
-
-        if (!seen.has(cleanUrl) && !cleanUrl.includes("/preview/") && !cleanUrl.includes("/seek/")) {
-          seen.add(cleanUrl);
-          media.push({
-            id: crypto.randomUUID(),
-            title,
-            source_url: ctx.rawUrl,
-            media_url: cleanUrl,
-            thumbnail_url: thumbnail,
-            mime: cleanUrl.includes(".m3u8") ? "application/x-mpegurl" : "video/mp4",
-            extension: "mp4",
-            width: null,
-            height: null,
-            duration: null,
-            filesize: null,
-            quality: "source",
-            kind: "video",
-            playable: true,
-            is_direct: true,
-          });
-        }
-      }
-
-      // Check UUID pattern for CDN
+      // Check UUID pattern first (most reliable master playlist)
       const uuidMatch = scriptContent.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
       if (uuidMatch && media.length === 0) {
         const uuid = uuidMatch[0];
@@ -121,6 +89,45 @@ export class MissavExtractor implements V4Extractor {
             playable: true,
             is_direct: true,
           });
+          break;
+        }
+      }
+
+      // Match HLS playlist URLs in script
+      const m3u8Matches = scriptContent.match(/https?:\/\/[^\s"'<>\\]+?\.(?:m3u8|mp4)[^\s"'<>\\]*/gi) || [];
+      for (const m3u8 of m3u8Matches) {
+        let cleanUrl = m3u8.replace(/\\/g, "").replace(/['",;]+$/, "");
+        try {
+          cleanUrl = new URL(cleanUrl, fetchRes.finalUrl).toString();
+        } catch {
+          continue;
+        }
+
+        if (
+          !seen.has(cleanUrl) &&
+          !cleanUrl.includes("/preview/") &&
+          !cleanUrl.includes("/seek/") &&
+          media.length === 0
+        ) {
+          seen.add(cleanUrl);
+          media.push({
+            id: crypto.randomUUID(),
+            title,
+            source_url: ctx.rawUrl,
+            media_url: cleanUrl,
+            thumbnail_url: thumbnail,
+            mime: cleanUrl.includes(".m3u8") ? "application/x-mpegurl" : "video/mp4",
+            extension: "mp4",
+            width: null,
+            height: null,
+            duration: null,
+            filesize: null,
+            quality: "source",
+            kind: "video",
+            playable: true,
+            is_direct: true,
+          });
+          break;
         }
       }
     }

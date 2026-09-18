@@ -195,7 +195,11 @@ export async function triggerDownload(
           return;
         } catch (clientErr: any) {
           if (clientErr?.message === "Cancelled") throw clientErr;
-          throw new Error(`Download failed: ${clientErr?.message || serverErrorMsg}`);
+          const msg = clientErr?.message || "";
+          if (msg.includes("403") || msg.includes("Failed to fetch")) {
+            throw new Error("Stream is protected by Cloudflare security. Use [Preview] to watch.");
+          }
+          throw new Error(`Download failed: ${msg || serverErrorMsg}`);
         }
       } else {
         try {
@@ -217,6 +221,10 @@ export async function triggerDownload(
           }
         } catch {}
       }
+    }
+
+    if (serverErrorMsg.includes("403") || serverErrorMsg.includes("Cloudflare")) {
+      throw new Error("Stream is protected by Cloudflare security. Use [Preview] to watch.");
     }
 
     throw new Error(serverErrorMsg || "Download failed");
