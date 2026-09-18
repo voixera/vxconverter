@@ -18,10 +18,7 @@ import {
   History,
   Activity,
   ArrowRight,
-  Sparkles,
-  Layers,
   Terminal,
-  ExternalLink,
 } from "lucide-react";
 
 export default function HomePage() {
@@ -34,7 +31,6 @@ export default function HomePage() {
 
   const heroHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const heroSubRef = useRef<HTMLParagraphElement | null>(null);
-  const heroVisualRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     fetch("/api/health")
@@ -47,27 +43,20 @@ export default function HomePage() {
       .catch(() => {});
 
     // GSAP Editorial Hero entrance
-    if (heroHeadingRef.current && heroSubRef.current && heroVisualRef.current) {
+    if (heroHeadingRef.current && heroSubRef.current) {
       const ctx = gsap.context(() => {
         gsap.from(heroHeadingRef.current, {
-          y: 32,
+          y: 28,
           opacity: 0,
           duration: 0.9,
           ease: "power3.out",
         });
         gsap.from(heroSubRef.current, {
-          y: 20,
+          y: 16,
           opacity: 0,
           duration: 0.8,
-          delay: 0.2,
-          ease: "power3.out",
-        });
-        gsap.from(heroVisualRef.current, {
-          scale: 0.96,
-          opacity: 0,
-          duration: 1.1,
           delay: 0.15,
-          ease: "power2.out",
+          ease: "power3.out",
         });
       });
       return () => ctx.revert();
@@ -117,13 +106,24 @@ export default function HomePage() {
   };
 
   return (
-    <main className="relative min-h-screen bg-vx-bg text-vx-text selection:bg-vx-accent selection:text-vx-bg overflow-x-hidden font-sans vx-grid-bg vx-radial-glow">
-      {/* Dynamic WebGL Particle & Grid Atmosphere */}
+    <main className="relative min-h-screen bg-[#040807] text-vx-text selection:bg-vx-accent selection:text-[#040807] overflow-x-hidden font-sans">
+      {/* 1. Full-Screen Atmospheric Background Image from Top to Bottom */}
+      <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden">
+        <img
+          src="/hero-visual.jpg"
+          alt=""
+          className="w-full h-full object-cover filter brightness-[0.22] contrast-[1.2] scale-105"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#040807]/80 via-[#040807]/60 to-[#040807]/95" />
+        <div className="absolute inset-0 vx-grid-bg opacity-30" />
+      </div>
+
+      {/* 2. WebGL Dynamic Atmosphere */}
       <WebglBackdrop />
 
-      <div className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {/* Editorial Minimal Navigation */}
-        <header className="flex items-center justify-between border-b border-vx-border pb-5 backdrop-blur-md">
+      <div className="relative z-10 mx-auto max-w-5xl px-4 py-8 sm:px-6">
+        {/* Minimal Technical Header */}
+        <header className="flex items-center justify-between border-b border-vx-border/80 pb-5 backdrop-blur-md">
           <div className="flex items-center gap-3.5 font-mono">
             <img src="/logo.png" alt="VX Converter Logo" className="h-9 w-9 rounded-md object-cover ring-1 ring-vx-border" />
             <div>
@@ -147,126 +147,96 @@ export default function HomePage() {
           </div>
         </header>
 
-        {/* Hero Section with Editorial Composition & Real Asset */}
-        <section className="py-12 sm:py-20">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            {/* Left Column: Typography & Input Form */}
-            <div className="lg:col-span-7 text-left space-y-6">
-              <div className="inline-flex items-center gap-2 rounded-full border border-vx-border bg-vx-surface/90 px-3.5 py-1 font-mono text-xs text-vx-accent shadow-sm">
-                <Cpu className="w-3.5 h-3.5" />
-                <span className="tracking-wider uppercase font-semibold">ENGINE_V4_VX // PUBLIC_MEDIA_SCRAPER</span>
-              </div>
-
-              <h1
-                ref={heroHeadingRef}
-                className="text-4xl font-semibold tracking-tight text-vx-text sm:text-6xl leading-[1.08]"
-              >
-                Find media hiding in <span className="text-vx-accent italic font-normal">plain sight</span>.
-              </h1>
-
-              <p
-                ref={heroSubRef}
-                className="max-w-xl text-sm sm:text-base leading-relaxed text-vx-dim"
-              >
-                Paste any public page URL. Engine V4 VX resolves streams, OpenGraph tags, HTML5 tags, and embedded player configs to deliver clean, validated media candidates.
-              </p>
-
-              {/* URL Input Form */}
-              <form onSubmit={submit} className="space-y-3 pt-2">
-                <div className="relative flex flex-col sm:flex-row gap-2">
-                  <div className="relative flex-1">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-vx-dim">
-                      <Search className="w-4 h-4" />
-                    </div>
-                    <input
-                      id="source-url"
-                      type="url"
-                      required
-                      value={url}
-                      onChange={(event) => setUrl(event.target.value)}
-                      placeholder="Paste public media or page URL (e.g. YouTube, direct video, Vimeo)..."
-                      disabled={busy}
-                      className="w-full rounded-xl border border-vx-border bg-vx-bg-elevated/90 pl-10 pr-4 py-3.5 font-mono text-sm text-vx-text outline-none placeholder:text-vx-dim/50 focus:border-vx-accent focus:ring-1 focus:ring-vx-accent transition-all shadow-inner"
-                    />
-                  </div>
-
-                  <button
-                    disabled={busy}
-                    type="submit"
-                    className="rounded-xl bg-vx-accent px-6 py-3.5 font-mono text-sm font-bold text-vx-bg transition-all hover:bg-vx-accent-hover active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 flex items-center justify-center gap-2 shadow-md shadow-vx-accent/20 shrink-0"
-                  >
-                    {busy ? (
-                      <>
-                        <span className="w-4 h-4 border-2 border-vx-bg border-t-transparent rounded-full animate-spin" />
-                        <span>Inspecting...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Inspect URL</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Quick Test Samples */}
-                <div className="flex flex-wrap items-center gap-2 pt-1 font-mono text-[11px] text-vx-dim">
-                  <span className="text-vx-muted uppercase tracking-wider">Quick test:</span>
-                  <button
-                    type="button"
-                    onClick={() => loadSample("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")}
-                    className="px-2 py-0.5 rounded bg-vx-surface border border-vx-border hover:border-vx-border-light hover:text-vx-text transition-colors"
-                  >
-                    Direct MP4
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadSample("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}
-                    className="px-2 py-0.5 rounded bg-vx-surface border border-vx-border hover:border-vx-border-light hover:text-vx-text transition-colors"
-                  >
-                    YouTube Video
-                  </button>
-                </div>
-              </form>
-
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  role="alert"
-                  className="p-3.5 rounded-xl border border-vx-red/30 bg-vx-red/10 text-left font-mono text-xs text-vx-red flex items-start gap-2"
-                >
-                  <span className="select-none font-bold">&gt;</span>
-                  <span>{error}</span>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Right Column: Editorial Visual Asset Display */}
-            <div ref={heroVisualRef} className="lg:col-span-5 relative">
-              <div className="relative rounded-2xl overflow-hidden border border-vx-border-light/70 bg-vx-bg-elevated shadow-2xl vx-corner-mark">
-                <img
-                  src="/hero-visual.jpg"
-                  alt="VX Media Analysis Visual"
-                  className="w-full h-[360px] sm:h-[420px] object-cover filter contrast-[1.05] brightness-90 hover:scale-[1.02] transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-vx-bg via-transparent to-transparent opacity-80" />
-
-                {/* Editorial Metadata Overlay */}
-                <div className="absolute bottom-4 left-4 right-4 p-3.5 rounded-xl bg-vx-surface/85 backdrop-blur-md border border-vx-border font-mono text-xs text-vx-dim flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <p className="text-vx-text text-[11px] font-semibold tracking-wider uppercase">
-                      INSPECTOR_CORE // V4
-                    </p>
-                    <p className="text-[10px] text-vx-dim">CHROMA: 4:4:4 · RANGE STREAMING ACTIVE</p>
-                  </div>
-                  <span className="text-[10px] text-vx-accent px-2 py-0.5 rounded bg-vx-bg border border-vx-border font-bold">
-                    60 FPS
-                  </span>
-                </div>
-              </div>
-            </div>
+        {/* Centered Hero Section */}
+        <section className="mx-auto max-w-3xl py-20 text-center sm:py-28">
+          <div className="inline-flex items-center gap-2 rounded-full border border-vx-border bg-vx-surface/90 px-3.5 py-1 font-mono text-xs text-vx-accent shadow-sm mb-6">
+            <Cpu className="w-3.5 h-3.5" />
+            <span className="tracking-wider uppercase font-semibold">ENGINE_V4_VX // PUBLIC_MEDIA_SCRAPER</span>
           </div>
+
+          <h1
+            ref={heroHeadingRef}
+            className="text-4xl font-semibold tracking-tight text-vx-text sm:text-6xl sm:leading-[1.1]"
+          >
+            Find media hiding in <span className="text-vx-accent italic font-normal">plain sight</span>.
+          </h1>
+
+          <p
+            ref={heroSubRef}
+            className="mx-auto mt-6 max-w-xl text-sm sm:text-base leading-relaxed text-vx-dim"
+          >
+            Paste any public page URL. Engine V4 VX resolves streams, OpenGraph tags, HTML5 tags, and embedded player configs to deliver clean, validated media candidates.
+          </p>
+
+          {/* Centered Large Search & Inspection Form */}
+          <form onSubmit={submit} className="mt-10 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2.5 p-1.5 rounded-2xl bg-vx-bg-elevated/90 backdrop-blur-md border border-vx-border shadow-2xl">
+              <div className="relative flex-1">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-vx-dim">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  id="source-url"
+                  type="url"
+                  required
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="Paste public media or webpage URL (e.g. YouTube, direct video, Vimeo)..."
+                  disabled={busy}
+                  className="w-full rounded-xl bg-transparent pl-11 pr-4 py-3.5 font-mono text-sm text-vx-text outline-none placeholder:text-vx-dim/50 focus:ring-0 transition-all"
+                />
+              </div>
+
+              <button
+                disabled={busy}
+                type="submit"
+                className="rounded-xl bg-vx-accent px-7 py-3.5 font-mono text-sm font-bold text-[#040807] transition-all hover:bg-vx-accent-hover active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 flex items-center justify-center gap-2 shadow-lg shadow-vx-accent/15 shrink-0"
+              >
+                {busy ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-[#040807] border-t-transparent rounded-full animate-spin" />
+                    <span>Inspecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Inspect URL</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Quick Test Samples */}
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1 font-mono text-[11px] text-vx-dim">
+              <span className="text-vx-muted uppercase tracking-wider">Quick test:</span>
+              <button
+                type="button"
+                onClick={() => loadSample("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")}
+                className="px-2.5 py-0.5 rounded bg-vx-surface/80 border border-vx-border hover:border-vx-border-light hover:text-vx-text transition-colors"
+              >
+                Direct MP4
+              </button>
+              <button
+                type="button"
+                onClick={() => loadSample("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}
+                className="px-2.5 py-0.5 rounded bg-vx-surface/80 border border-vx-border hover:border-vx-border-light hover:text-vx-text transition-colors"
+              >
+                YouTube Video
+              </button>
+            </div>
+          </form>
+
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              role="alert"
+              className="mt-5 p-3.5 rounded-xl border border-vx-red/30 bg-vx-red/10 text-left font-mono text-xs text-vx-red flex items-start gap-2"
+            >
+              <span className="select-none font-bold">&gt;</span>
+              <span>{error}</span>
+            </motion.div>
+          )}
 
           {busy && <ScanLine />}
         </section>

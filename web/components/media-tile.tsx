@@ -13,6 +13,7 @@ interface MediaTileProps {
 export function MediaTile({ media }: MediaTileProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const formatDuration = (seconds: number | null) => {
     if (!seconds) return null;
@@ -51,16 +52,17 @@ export function MediaTile({ media }: MediaTileProps) {
   };
 
   return (
-    <div className="flex flex-col bg-vx-surface/90 backdrop-blur border border-vx-border hover:border-vx-border-light transition-all duration-200 rounded-xl overflow-hidden shadow-lg group vx-corner-mark">
+    <div className="flex flex-col bg-vx-surface/90 backdrop-blur-md border border-vx-border hover:border-vx-border-light transition-all duration-200 rounded-xl overflow-hidden shadow-xl group vx-corner-mark">
       {/* Media Preview or Thumbnail Header */}
       {showPreview ? (
         <PeekState media={media} onClose={() => setShowPreview(false)} />
       ) : (
-        <div className="relative aspect-[16/9] bg-vx-bg flex items-center justify-center overflow-hidden border-b border-vx-border">
-          {media.thumbnail_url ? (
+        <div className="relative aspect-[16/9] bg-vx-bg flex items-center justify-center overflow-hidden border-b border-vx-border select-none">
+          {media.thumbnail_url && !imgError ? (
             <img
               src={media.thumbnail_url}
               alt={media.title}
+              onError={() => setImgError(true)}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             />
           ) : (
@@ -72,7 +74,7 @@ export function MediaTile({ media }: MediaTileProps) {
               ) : (
                 <Film className="w-8 h-8 text-vx-accent opacity-60 mb-2" />
               )}
-              <span className="font-mono text-[11px] text-vx-dim/70">
+              <span className="font-mono text-[11px] text-vx-dim/70 uppercase tracking-wider">
                 {media.mime}
               </span>
             </div>
