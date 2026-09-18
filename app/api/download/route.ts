@@ -10,13 +10,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Headers that convince CDNs we're a standard browser
+// Standard modern browser headers
 const BROWSER_HEADERS: Record<string, string> = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   Accept: "*/*",
-  "Accept-Encoding": "identity",
   "Accept-Language": "en-US,en;q=0.9",
+  "Sec-Fetch-Dest": "empty",
+  "Sec-Fetch-Mode": "cors",
+  "Sec-Fetch-Site": "cross-site",
 };
 
 function sanitizeFilename(title: string, quality: string, ext: string): string {
@@ -42,10 +44,26 @@ async function streamHlsSegments(
   fetchHeaders: Record<string, string>,
   filename: string,
 ): Promise<Response> {
-  const res = await fetch(masterUrl, {
+  let res = await fetch(masterUrl, {
     headers: fetchHeaders,
     signal: AbortSignal.timeout(30000),
   });
+
+  // If 403, retry with playlist domain as Referer
+  if (res.status === 403) {
+    try {
+      const urlObj = new URL(masterUrl);
+      const altHeaders = { ...fetchHeaders, Referer: urlObj.origin + "/", Origin: urlObj.origin };
+      const retryRes = await fetch(masterUrl, {
+        headers: altHeaders,
+        signal: AbortSignal.timeout(30000),
+      });
+      if (retryRes.ok) {
+        res = retryRes;
+        fetchHeaders = altHeaders;
+      }
+    } catch {}
+  }
 
   if (!res.ok) {
     throw new Error(`HLS playlist fetch failed with HTTP ${res.status}`);
@@ -122,10 +140,19 @@ async function streamHlsSegments(
     async start(controller) {
       try {
         for (const segUrl of segmentUrls) {
-          const segRes = await fetch(segUrl, {
+          let segRes = await fetch(segUrl, {
             headers: fetchHeaders,
             signal: AbortSignal.timeout(30000),
           });
+          if (!segRes.ok && segRes.status === 403) {
+            try {
+              const segObj = new URL(segUrl);
+              segRes = await fetch(segUrl, {
+                headers: { ...fetchHeaders, Referer: segObj.origin + "/", Origin: segObj.origin },
+                signal: AbortSignal.timeout(30000),
+              });
+            } catch {}
+          }
           if (segRes.ok && segRes.body) {
             const reader = segRes.body.getReader();
             while (true) {
@@ -152,7 +179,7 @@ async function streamHlsSegments(
 
 /**
  * Proxy an HTTPS media URL through the server.
- * Handles both direct media streams and HLS (.m3u8) playlists.
+ * Handles direct media streams and HLS (.m3u8) playlists.
  */
 async function proxyUrl(
   mediaUrl: string,
@@ -266,7 +293,6 @@ async function handleDownload(
     );
   }
 
-  // Embed stream without source cannot be relayed
   if (media.kind === "stream" && media.is_direct === false && !media.media_url) {
     return NextResponse.json(
       { ok: false, error: { code: "NOT_DOWNLOADABLE", message: "Embed player only — not directly downloadable." } },

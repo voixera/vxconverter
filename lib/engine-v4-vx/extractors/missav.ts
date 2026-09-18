@@ -24,7 +24,7 @@ export function unpackJs(packed: string): string {
 }
 
 /**
- * Engine V4 VX - MissAV & Surrit / Sixyik Extractor
+ * Engine V4 VX - MissAV & Stream Extractor
  */
 export class MissavExtractor implements V4Extractor {
   public name = "MissavExtractor";
@@ -44,7 +44,7 @@ export class MissavExtractor implements V4Extractor {
 
     const ogTitle = html.match(/<meta[^>]+(?:property|name)=["'](?:og:title|twitter:title)["'][^>]+content=["']([^"']+)["']/i)?.[1]?.trim();
     const pageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
-    const title = ogTitle || pageTitle || "MissAV Video";
+    const title = ogTitle || pageTitle || "Video Stream";
 
     const ogImage = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|og:image:url|twitter:image)["'][^>]+content=["']([^"']+)["']/i)?.[1];
     let thumbnail: string | null = null;
@@ -75,7 +75,7 @@ export class MissavExtractor implements V4Extractor {
           continue;
         }
 
-        if (!seen.has(cleanUrl) && !cleanUrl.includes("/preview/")) {
+        if (!seen.has(cleanUrl) && !cleanUrl.includes("/preview/") && !cleanUrl.includes("/seek/")) {
           seen.add(cleanUrl);
           media.push({
             id: crypto.randomUUID(),
@@ -97,7 +97,7 @@ export class MissavExtractor implements V4Extractor {
         }
       }
 
-      // Check UUID pattern for surrit / sixyik CDN
+      // Check UUID pattern for CDN
       const uuidMatch = scriptContent.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
       if (uuidMatch && media.length === 0) {
         const uuid = uuidMatch[0];

@@ -28,13 +28,131 @@ export async function fetchHistory(): Promise<ScanResult[]> {
 type ProgressCallback = (loaded: number, total: number | null) => void;
 
 /**
- * Download media automatically to user's disk via server streaming relay.
- *
- * 1. POST /api/download with candidate metadata.
- * 2. If browser supports File System Access API (showSaveFilePicker):
- *    streams directly to disk with live byte progress and zero RAM buffer.
- * 3. Fallback: streams ReadableStream into Blob, triggers automatic hidden <a download> click.
- * 4. NEVER navigates or redirects the browser to external links.
+ * Client-side HLS segment downloader & assembler.
+ * Used when server relay receives 403 or for direct high-speed client streams.
+ */
+async function clientDownloadHls(
+  masterUrl: string,
+  filename: string,
+  onProgress?: ProgressCallback,
+): Promise<void> {
+  const res = await fetch(masterUrl);
+  if (!res.ok) throw new Error(`HLS fetch failed: ${res.status}`);
+  let text = await res.text();
+  let playlistUrl = masterUrl;
+
+  // Master playlist variant selection
+  if (text.includes("#EXT-X-STREAM-INF")) {
+    const lines = text.split("\n");
+    let bestUrl = "";
+    let maxBw = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("#EXT-X-STREAM-INF")) {
+        const bwMatch = /BANDWIDTH=(\d+)/i.exec(line);
+        const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+        const nextLine = (lines[i + 1] || "").trim();
+        if (nextLine && !nextLine.startsWith("#")) {
+          if (bw >= maxBw || !bestUrl) {
+            maxBw = bw;
+            try {
+              bestUrl = new URL(nextLine, masterUrl).toString();
+            } catch {}
+          }
+        }
+      }
+    }
+    if (bestUrl) {
+      playlistUrl = bestUrl;
+      const subRes = await fetch(playlistUrl);
+      if (subRes.ok) text = await subRes.text();
+    }
+  }
+
+  // Extract all segment URLs
+  const lines = text.split("\n");
+  const segmentUrls: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line && !line.startsWith("#")) {
+      try {
+        const absSegment = new URL(line, playlistUrl).toString();
+        segmentUrls.push(absSegment);
+      } catch {}
+    }
+  }
+
+  if (segmentUrls.length === 0) {
+    throw new Error("No media segments found in HLS playlist");
+  }
+
+  const baseName = filename.replace(/\.[^.]+$/, "");
+  const finalFilename = `${baseName}.mp4`;
+
+  // Path A: File System Access API
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: finalFilename,
+        types: [{ description: "MP4 Video", accept: { "video/mp4": [".mp4"] } }],
+      });
+      const writable = await handle.createWritable();
+      for (let i = 0; i < segmentUrls.length; i++) {
+        const segUrl = segmentUrls[i];
+        const segRes = await fetch(segUrl);
+        if (segRes.ok && segRes.body) {
+          const reader = segRes.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.length > 0) {
+              await writable.write(value);
+            }
+          }
+        }
+        onProgress?.(i + 1, segmentUrls.length);
+      }
+      await writable.close();
+      return;
+    } catch (e: any) {
+      if (e?.name === "AbortError") throw new Error("Cancelled");
+    }
+  }
+
+  // Path B: Blob Accumulator
+  const chunks: Uint8Array[] = [];
+  for (let i = 0; i < segmentUrls.length; i++) {
+    const segUrl = segmentUrls[i];
+    const segRes = await fetch(segUrl);
+    if (segRes.ok && segRes.body) {
+      const reader = segRes.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) {
+          chunks.push(value);
+        }
+      }
+    }
+    onProgress?.(i + 1, segmentUrls.length);
+  }
+
+  const blob = new Blob(chunks as unknown as ArrayBuffer[], { type: "video/mp4" });
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.style.display = "none";
+  a.href = blobUrl;
+  a.download = finalFilename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(blobUrl);
+    if (document.body.contains(a)) document.body.removeChild(a);
+  }, 15000);
+}
+
+/**
+ * Download media automatically to user's disk via server streaming relay with client fallback.
  */
 export async function triggerDownload(
   mediaOrId: string | MediaCandidate,
@@ -44,7 +162,9 @@ export async function triggerDownload(
   const mediaObj = typeof mediaOrId === "object" ? mediaOrId : undefined;
   const mediaId = typeof mediaOrId === "string" ? mediaOrId : mediaOrId.id;
 
-  let res: Response;
+  let res: Response | null = null;
+  let serverErrorMsg = "";
+
   try {
     res = await fetch("/api/download", {
       method: "POST",
@@ -52,30 +172,68 @@ export async function triggerDownload(
       body: JSON.stringify({ media_id: mediaId, media: mediaObj }),
     });
   } catch (netErr: any) {
-    throw new Error(`Download failed: ${netErr?.message || "Could not connect to relay server"}`);
+    serverErrorMsg = netErr?.message || "Server connection failed";
   }
 
-  // Error detection — server returns JSON on failure
-  const ct = res.headers.get("content-type") || "";
-  if (!res.ok || ct.includes("application/json")) {
-    let msg = `Download failed (HTTP ${res.status})`;
-    try {
-      const errPayload = await res.json();
-      msg = errPayload?.error?.message || msg;
-    } catch {}
-    throw new Error(msg);
+  const ct = res?.headers.get("content-type") || "";
+  const isServerOk = res && res.ok && !ct.includes("application/json");
+
+  // If server failed (e.g. 502/403 upstream block), execute client-side direct stream download
+  if (!res || !isServerOk) {
+    if (res && !res.ok) {
+      try {
+        const errPayload = await res.json();
+        serverErrorMsg = errPayload?.error?.message || `Server returned ${res.status}`;
+      } catch {}
+    }
+
+    if (mediaObj?.media_url) {
+      const isHls = mediaObj.media_url.includes(".m3u8") || mediaObj.mime.includes("mpegurl");
+      if (isHls) {
+        try {
+          await clientDownloadHls(mediaObj.media_url, filename, onProgress);
+          return;
+        } catch (clientErr: any) {
+          if (clientErr?.message === "Cancelled") throw clientErr;
+          throw new Error(`Download failed: ${clientErr?.message || serverErrorMsg}`);
+        }
+      } else {
+        try {
+          const directRes = await fetch(mediaObj.media_url);
+          if (directRes.ok && directRes.body) {
+            const blob = await directRes.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.style.display = "none";
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+              URL.revokeObjectURL(blobUrl);
+              if (document.body.contains(a)) document.body.removeChild(a);
+            }, 15000);
+            return;
+          }
+        } catch {}
+      }
+    }
+
+    throw new Error(serverErrorMsg || "Download failed");
   }
 
-  // Extract server-provided filename from Content-Disposition
-  const disposition = res.headers.get("content-disposition") || "";
+  const serverRes = res;
+
+  // Server streaming download path
+  const disposition = serverRes.headers.get("content-disposition") || "";
   const nameMatch =
     /filename\*=UTF-8''([^;\s]+)/.exec(disposition) ||
     /filename="([^"]+)"/.exec(disposition);
   const dlFilename = nameMatch ? decodeURIComponent(nameMatch[1]) : filename;
-  const totalBytes = res.headers.get("content-length") ? Number(res.headers.get("content-length")) : null;
+  const totalBytes = serverRes.headers.get("content-length") ? Number(serverRes.headers.get("content-length")) : null;
 
-  // Path A: File System Access API — stream directly to file on disk
-  if (typeof window !== "undefined" && "showSaveFilePicker" in window && res.body) {
+  // Path A: File System Access API
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window && serverRes.body) {
     try {
       const ext = dlFilename.split(".").pop() || "mp4";
       const mimeMap: Record<string, string> = {
@@ -93,7 +251,7 @@ export async function triggerDownload(
       });
       const writable = await handle.createWritable();
 
-      const reader = res.body.getReader();
+      const reader = serverRes.body.getReader();
       let loaded = 0;
       while (true) {
         const { done, value } = await reader.read();
@@ -108,13 +266,12 @@ export async function triggerDownload(
       return;
     } catch (e: any) {
       if (e?.name === "AbortError") throw new Error("Cancelled");
-      // Fall through to memory blob stream
     }
   }
 
-  // Path B: ReadableStream accumulator → local Blob URL → programmatic automatic download
-  if (res.body) {
-    const reader = res.body.getReader();
+  // Path B: ReadableStream accumulator
+  if (serverRes.body) {
+    const reader = serverRes.body.getReader();
     const chunks: Uint8Array[] = [];
     let loaded = 0;
 
