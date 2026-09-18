@@ -1,9 +1,0 @@
-rust_api/
-src/
-migrations/
-Cargo.toml
-Cargo.lock
-target/
-.env
-.env.*
-!.env.example
