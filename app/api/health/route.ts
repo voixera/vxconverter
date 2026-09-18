@@ -7,9 +7,9 @@ export function GET() {
     ok: true,
     data: {
       status: "operational",
-      version: "0.1.0",
-      engine: "VX Core",
-      uptime_secs: 0,
+      version: "4.0.0",
+      engine: "Engine V4 VX",
+      uptime_secs: Math.floor(process.uptime()),
     },
   });
 }

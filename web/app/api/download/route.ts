@@ -1,31 +1,10 @@
 import { NextResponse } from "next/server";
 import { getMediaById } from "../../../lib/store";
+import { SecurityGuard } from "../../../lib/engine-v4-vx/guard";
+import { MimeDetector } from "../../../lib/engine-v4-vx/mime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (
-    host === "localhost" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    host === "127.0.0.1" ||
-    host === "0.0.0.0" ||
-    host === "::1"
-  ) {
-    return true;
-  }
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (ipv4) {
-    const [, a, b] = ipv4.map(Number);
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-  }
-  return false;
-}
 
 export async function POST(request: Request) {
   let body: { media_id?: unknown; format?: unknown };
@@ -53,30 +32,29 @@ export async function POST(request: Request) {
     );
   }
 
-  let mediaUrl: URL;
-  try {
-    mediaUrl = new URL(media.media_url);
-  } catch {
+  const validation = SecurityGuard.isUrlSafe(media.media_url);
+  if (!validation.safe || !validation.parsed) {
     return NextResponse.json(
-      { ok: false, error: { code: "INVALID_URL", message: "Invalid media URL" } },
-      { status: 400 },
-    );
-  }
-
-  if (isPrivateHost(mediaUrl.hostname)) {
-    return NextResponse.json(
-      { ok: false, error: { code: "SSRF_BLOCKED", message: "Private destinations are not supported" } },
+      { ok: false, error: { code: validation.reason || "SSRF_BLOCKED", message: "Private destinations are not supported" } },
       { status: 403 },
     );
   }
 
+  const mediaUrl = validation.parsed;
+
   try {
+    const rangeHeader = request.headers.get("range");
+    const fetchHeaders: Record<string, string> = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "*/*",
+    };
+    if (rangeHeader) {
+      fetchHeaders["Range"] = rangeHeader;
+    }
+
     const upstream = await fetch(mediaUrl.toString(), {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "*/*",
-      },
+      headers: fetchHeaders,
       signal: AbortSignal.timeout(30000),
     });
 
@@ -87,22 +65,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const safeTitle = (media.title || "vx-media")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "vx-media";
-    const filename = `${safeTitle}-${media.quality || "source"}.${media.extension || "mp4"}`;
-    const contentType = media.mime || upstream.headers.get("content-type") || "application/octet-stream";
+    const upstreamContentType = upstream.headers.get("content-type");
+    const mimeInfo = MimeDetector.resolve(media.media_url, upstreamContentType || media.mime);
+    const filename = MimeDetector.forgeFilename(media.title, media.quality, mimeInfo.extension);
 
     const headers = new Headers();
-    headers.set("Content-Type", contentType);
+    headers.set("Content-Type", mimeInfo.mime);
     headers.set("Content-Disposition", `attachment; filename="${filename}"`);
-    const contentLength = upstream.headers.get("content-length");
-    if (contentLength) headers.set("Content-Length", contentLength);
     headers.set("Accept-Ranges", "bytes");
 
+    const contentLength = upstream.headers.get("content-length");
+    if (contentLength) headers.set("Content-Length", contentLength);
+
+    const contentRange = upstream.headers.get("content-range");
+    if (contentRange) headers.set("Content-Range", contentRange);
+
     return new Response(upstream.body, {
-      status: 200,
+      status: upstream.status === 206 ? 206 : 200,
       headers,
     });
   } catch (err) {

@@ -11,6 +11,7 @@ interface MediaTileProps {
 
 export function MediaTile({ media }: MediaTileProps) {
   const [showPreview, setShowPreview] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const formatDuration = (seconds: number | null) => {
     if (!seconds) return null;
@@ -25,18 +26,25 @@ export function MediaTile({ media }: MediaTileProps) {
     return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`;
   };
 
-  const filename = `${media.title
+  const filename = `${(media.title || "vx-media")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "vx-media"}-${media.quality}.${media.extension}`;
 
   const metaTokens = [
     media.extension.toUpperCase(),
+    media.mime,
     media.quality.toUpperCase(),
     media.width && media.height ? `${media.width}×${media.height}` : null,
     formatDuration(media.duration),
     formatSize(media.filesize),
   ].filter(Boolean);
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(media.media_url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="flex flex-col bg-vx-surface border border-vx-border hover:border-vx-border-light transition-colors rounded overflow-hidden">
@@ -98,13 +106,22 @@ export function MediaTile({ media }: MediaTileProps) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-2 border-t border-vx-border/50">
-          <button
-            onClick={() => setShowPreview((prev) => !prev)}
-            className="px-2.5 py-1.5 rounded text-xs font-mono text-vx-text bg-vx-subtle border border-vx-border hover:bg-vx-border/40 transition-colors"
-          >
-            {showPreview ? "[ Hide ]" : "[ Preview ]"}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-vx-border/50">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setShowPreview((prev) => !prev)}
+              className="px-2.5 py-1.5 rounded text-xs font-mono text-vx-text bg-vx-subtle border border-vx-border hover:bg-vx-border/40 transition-colors"
+            >
+              {showPreview ? "[ Hide ]" : "[ Preview ]"}
+            </button>
+            <button
+              onClick={copyUrl}
+              className="px-2 py-1.5 rounded text-xs font-mono text-vx-dim hover:text-vx-text border border-vx-border/60 hover:bg-vx-subtle transition-colors"
+              title="Copy Media URL"
+            >
+              {copied ? "[ Copied ]" : "[ Copy URL ]"}
+            </button>
+          </div>
 
           <DownloadChip
             mediaId={media.id}
