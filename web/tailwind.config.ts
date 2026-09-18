@@ -12,21 +12,21 @@ const config: Config = {
     extend: {
       colors: {
         vx: {
-          bg: "#060d0c",
-          "bg-elevated": "#0a1715",
-          surface: "#0e1e1c",
-          subtle: "#142b28",
-          border: "#1d3b36",
-          "border-light": "#2a524b",
-          accent: "#a7f3d0",
-          "accent-hover": "#6ee7b7",
-          "accent-warm": "#f4f3ed",
-          emerald: "#34d399",
-          cyan: "#2dd4bf",
-          red: "#f87171",
-          dim: "#7f9690",
-          muted: "#4d635e",
-          text: "#f4f3ed",
+          bg: "#09090b",
+          "bg-elevated": "#121215",
+          surface: "#18181b",
+          subtle: "#27272a",
+          border: "#27272a",
+          "border-light": "#3f3f46",
+          accent: "#ffffff",
+          "accent-hover": "#e4e4e7",
+          "accent-warm": "#f4f4f5",
+          emerald: "#ffffff",
+          cyan: "#ffffff",
+          red: "#ef4444",
+          dim: "#a1a1aa",
+          muted: "#71717a",
+          text: "#fafafa",
         },
       },
       fontFamily: {
@@ -49,7 +49,7 @@ const config: Config = {
       animation: {
         "scan-line": "scanline 2s linear infinite",
         "pulse-fast": "pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-        "fade-in": "fadeIn 0.5s ease-out forwards",
+        "fade-in": "fadeIn 0.4s ease-out forwards",
       },
       keyframes: {
         scanline: {
@@ -57,7 +57,7 @@ const config: Config = {
           "100%": { transform: "translateY(1000%)" },
         },
         fadeIn: {
-          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
       },

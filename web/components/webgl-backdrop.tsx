@@ -32,17 +32,19 @@ export function WebglBackdrop() {
         vec2 st = gl_FragCoord.xy / u_resolution.xy;
         st.x *= u_resolution.x / u_resolution.y;
 
-        vec2 grid = fract(st * 18.0);
-        float line = step(0.97, grid.x) + step(0.97, grid.y);
+        // Subtle moving technical grid
+        vec2 grid = fract(st * 20.0);
+        float line = step(0.98, grid.x) + step(0.98, grid.y);
 
-        float drift = sin(st.x * 3.0 + u_time * 0.2) * cos(st.y * 3.0 + u_time * 0.15);
-        float glow = smoothstep(0.4, 0.9, drift) * 0.04;
+        // Soft ambient particle drift
+        float drift = sin(st.x * 2.5 + u_time * 0.15) * cos(st.y * 2.5 + u_time * 0.12);
+        float glow = smoothstep(0.45, 0.9, drift) * 0.035;
 
-        vec3 color = vec3(0.024, 0.028, 0.035);
-        color += vec3(0.96, 0.62, 0.04) * glow * 0.6;
-        color += vec3(0.05, 0.07, 0.09) * line * 0.25;
+        vec3 color = vec3(0.01, 0.01, 0.012); // Pure black
+        color += vec3(1.0, 1.0, 1.0) * glow * 0.35; // Pure white atmospheric glow
+        color += vec3(0.15, 0.15, 0.18) * line * 0.18; // Crisp subtle grid
 
-        gl_FragColor = vec4(color, 0.35);
+        gl_FragColor = vec4(color, 0.4);
       }
     `;
 
@@ -128,7 +130,7 @@ export function WebglBackdrop() {
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-0 w-full h-full opacity-60"
+      className="fixed inset-0 pointer-events-none z-0 w-full h-full opacity-40"
       aria-hidden="true"
     />
   );

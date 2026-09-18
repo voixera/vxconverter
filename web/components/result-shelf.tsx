@@ -30,15 +30,15 @@ export function ResultShelf({ result, onReset }: ResultShelfProps) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -16 }}
-      transition={{ duration: 0.35, ease: "easeOut" }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       className="w-full max-w-5xl mx-auto my-10 space-y-5"
     >
       {/* Top Inspector Status Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-vx-surface/80 backdrop-blur-md border border-vx-border rounded-lg shadow-lg">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-neutral-950/90 backdrop-blur-md border border-neutral-800 rounded-lg shadow-2xl">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-vx-emerald animate-pulse" />
-            <span className="font-mono text-xs font-semibold tracking-wider text-vx-text uppercase">
+          <div className="flex items-center gap-2 font-mono text-xs text-neutral-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+            <span className="font-semibold tracking-wider uppercase">
               {count} {count === 1 ? "CANDIDATE DISCOVERED" : "CANDIDATES DISCOVERED"}
             </span>
           </div>
@@ -50,36 +50,36 @@ export function ResultShelf({ result, onReset }: ResultShelfProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Filter Pills */}
-          <div className="hidden sm:flex items-center gap-1 bg-vx-bg p-1 rounded border border-vx-border text-[11px] font-mono">
+          {/* Monochrome Filter Tabs */}
+          <div className="hidden sm:flex items-center gap-1 bg-black p-1 rounded border border-neutral-800 text-[11px] font-mono">
             <button
               onClick={() => setFilter("all")}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                filter === "all" ? "bg-vx-accent text-vx-bg font-bold" : "text-vx-dim hover:text-vx-text"
+              className={`px-2.5 py-1 rounded transition-colors ${
+                filter === "all" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
               }`}
             >
               All ({count})
             </button>
             <button
               onClick={() => setFilter("video")}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                filter === "video" ? "bg-vx-accent text-vx-bg font-bold" : "text-vx-dim hover:text-vx-text"
+              className={`px-2.5 py-1 rounded transition-colors ${
+                filter === "video" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
               }`}
             >
               Videos
             </button>
             <button
               onClick={() => setFilter("audio")}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                filter === "audio" ? "bg-vx-accent text-vx-bg font-bold" : "text-vx-dim hover:text-vx-text"
+              className={`px-2.5 py-1 rounded transition-colors ${
+                filter === "audio" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
               }`}
             >
               Audio
             </button>
             <button
               onClick={() => setFilter("stream")}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                filter === "stream" ? "bg-vx-accent text-vx-bg font-bold" : "text-vx-dim hover:text-vx-text"
+              className={`px-2.5 py-1 rounded transition-colors ${
+                filter === "stream" ? "bg-white text-black font-bold" : "text-neutral-400 hover:text-white"
               }`}
             >
               Streams
@@ -89,7 +89,7 @@ export function ResultShelf({ result, onReset }: ResultShelfProps) {
           {onReset && (
             <button
               onClick={onReset}
-              className="flex items-center gap-1 text-xs font-mono text-vx-dim hover:text-vx-text px-2.5 py-1.5 rounded border border-vx-border bg-vx-bg hover:bg-vx-subtle transition-colors"
+              className="flex items-center gap-1 text-xs font-mono text-neutral-400 hover:text-white px-2.5 py-1.5 rounded border border-neutral-800 bg-black hover:bg-neutral-900 transition-colors"
             >
               <RotateCcw className="w-3 h-3" />
               <span>[ Clear ]</span>
@@ -112,10 +112,10 @@ export function ResultShelf({ result, onReset }: ResultShelfProps) {
             <motion.div
               key={media.id}
               layout
-              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              initial={{ opacity: 0, scale: 0.97, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.25, delay: idx * 0.05 }}
+              transition={{ duration: 0.2, delay: idx * 0.04 }}
             >
               <MediaTile media={media} />
             </motion.div>

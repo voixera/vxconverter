@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Download, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Download, Loader2, AlertCircle, Check } from "lucide-react";
 import { triggerDownload } from "../lib/wire";
 
 interface DownloadChipProps {
@@ -25,7 +25,7 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
     setStage("Verifying stream...");
 
     try {
-      setStage("Validating media bytes...");
+      setStage("Validating bytes...");
       await triggerDownload(mediaId, filename);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -50,22 +50,22 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
       <button
         onClick={handleDownload}
         disabled={downloading}
-        className={`px-3 py-1.5 rounded text-xs font-mono font-medium transition-all duration-200 flex items-center gap-1.5 border select-none ${
+        className={`px-3 py-1.5 rounded text-xs font-mono font-medium transition-all duration-150 flex items-center gap-1.5 border select-none ${
           success
-            ? "bg-vx-emerald/20 text-vx-emerald border-vx-emerald/40"
+            ? "bg-neutral-800 text-white border-neutral-600"
             : downloading
-              ? "bg-vx-surface text-vx-dim border-vx-border cursor-wait"
-              : "bg-vx-accent text-vx-bg border-vx-accent hover:bg-vx-accent-hover active:translate-y-0.5 shadow-sm"
+              ? "bg-neutral-900 text-neutral-400 border-neutral-800 cursor-wait"
+              : "bg-white text-black border-white hover:bg-neutral-200 active:translate-y-0.5"
         }`}
       >
         {success ? (
           <>
-            <CheckCircle2 className="w-3.5 h-3.5" />
+            <Check className="w-3.5 h-3.5" />
             <span>Saved</span>
           </>
         ) : downloading ? (
           <>
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-vx-accent" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
             <span>{stage || "Streaming..."}</span>
           </>
         ) : (
@@ -73,7 +73,7 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
             <Download className="w-3.5 h-3.5" />
             <span>Download</span>
             {sizeLabel && (
-              <span className="opacity-80 text-[10px] pl-0.5 font-mono">
+              <span className="opacity-75 text-[10px] pl-0.5 font-mono">
                 ({sizeLabel})
               </span>
             )}
@@ -82,7 +82,7 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
       </button>
 
       {error && (
-        <span className="flex items-center gap-1 text-[11px] font-mono text-vx-red pt-0.5">
+        <span className="flex items-center gap-1 text-[11px] font-mono text-red-400 pt-0.5">
           <AlertCircle className="w-3 h-3 shrink-0" />
           <span>{error}</span>
         </span>
