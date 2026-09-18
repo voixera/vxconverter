@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { Download, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { triggerDownload } from "../lib/wire";
 
 interface DownloadChipProps {
@@ -12,18 +13,27 @@ interface DownloadChipProps {
 
 export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChipProps) {
   const [downloading, setDownloading] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
   const handleDownload = async () => {
     if (downloading) return;
     setDownloading(true);
     setError(null);
+    setSuccess(false);
+    setStage("Verifying stream...");
+
     try {
+      setStage("Validating media bytes...");
       await triggerDownload(mediaId, filename);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
     } catch (e: any) {
-      setError(e.message || "Failed");
+      setError(e.message || "Download failed");
     } finally {
       setDownloading(false);
+      setStage(null);
     }
   };
 
@@ -40,62 +50,41 @@ export function DownloadChip({ mediaId, filename, filesize, mime }: DownloadChip
       <button
         onClick={handleDownload}
         disabled={downloading}
-        className={`px-3 py-1.5 rounded text-xs font-mono font-medium transition-all duration-150 flex items-center gap-1.5 border ${
-          downloading
-            ? "bg-vx-surface text-vx-dim border-vx-border cursor-wait"
-            : "bg-vx-accent text-vx-bg border-vx-accent hover:bg-vx-accent-hover active:translate-y-0.5"
+        className={`px-3 py-1.5 rounded text-xs font-mono font-medium transition-all duration-200 flex items-center gap-1.5 border select-none ${
+          success
+            ? "bg-vx-emerald/20 text-vx-emerald border-vx-emerald/40"
+            : downloading
+              ? "bg-vx-surface text-vx-dim border-vx-border cursor-wait"
+              : "bg-vx-accent text-vx-bg border-vx-accent hover:bg-vx-accent-hover active:translate-y-0.5 shadow-sm"
         }`}
       >
-        {downloading ? (
+        {success ? (
           <>
-            <svg
-              className="animate-spin h-3.5 w-3.5 text-vx-dim"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8v8H4z"
-              />
-            </svg>
-            <span>Streaming...</span>
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Saved</span>
+          </>
+        ) : downloading ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-vx-accent" />
+            <span>{stage || "Streaming..."}</span>
           </>
         ) : (
           <>
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-              />
-            </svg>
+            <Download className="w-3.5 h-3.5" />
             <span>Download</span>
             {sizeLabel && (
-              <span className="opacity-80 text-[10px] pl-1 font-mono">
+              <span className="opacity-80 text-[10px] pl-0.5 font-mono">
                 ({sizeLabel})
               </span>
             )}
           </>
         )}
       </button>
+
       {error && (
-        <span className="text-[11px] font-mono text-vx-red">
-          &gt; {error}
+        <span className="flex items-center gap-1 text-[11px] font-mono text-vx-red pt-0.5">
+          <AlertCircle className="w-3 h-3 shrink-0" />
+          <span>{error}</span>
         </span>
       )}
     </div>

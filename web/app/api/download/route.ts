@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getMediaById } from "../../../lib/store";
 import { SecurityGuard } from "../../../lib/engine-v4-vx/guard";
 import { MimeDetector } from "../../../lib/engine-v4-vx/mime";
+import { MediaValidator } from "../../../lib/engine-v4-vx/validator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   const media = getMediaById(body.media_id.trim());
   if (!media) {
     return NextResponse.json(
-      { ok: false, error: { code: "MEDIA_NOT_FOUND", message: "Media not found or expired" } },
+      { ok: false, error: { code: "MEDIA_NOT_FOUND", message: "Media session expired or not found. Please inspect the URL again." } },
       { status: 404 },
     );
   }
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       Accept: "*/*",
+      "Accept-Encoding": "identity",
     };
     if (rangeHeader) {
       fetchHeaders["Range"] = rangeHeader;
@@ -60,17 +62,43 @@ export async function POST(request: Request) {
 
     if (!upstream.ok || !upstream.body) {
       return NextResponse.json(
-        { ok: false, error: { code: "UPSTREAM_ERROR", message: `Source returned HTTP ${upstream.status}` } },
+        { ok: false, error: { code: "UPSTREAM_ERROR", message: `Source server returned HTTP ${upstream.status}` } },
         { status: 502 },
       );
     }
 
-    const upstreamContentType = upstream.headers.get("content-type");
-    const mimeInfo = MimeDetector.resolve(media.media_url, upstreamContentType || media.mime);
-    const filename = MimeDetector.forgeFilename(media.title, media.quality, mimeInfo.extension);
+    const reader = upstream.body.getReader();
+    const firstRead = await reader.read();
+
+    if (firstRead.done || !firstRead.value || firstRead.value.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: { code: "MEDIA_OUTPUT_INVALID", message: "Source returned an empty stream." } },
+        { status: 502 },
+      );
+    }
+
+    const firstChunk = firstRead.value;
+    const chunkValidation = MediaValidator.validateChunk(firstChunk);
+
+    if (!chunkValidation.valid || chunkValidation.isHtmlOrJson) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "MEDIA_OUTPUT_INVALID",
+            message: "Source returned a webpage or non-media text instead of raw media bytes.",
+          },
+        },
+        { status: 502 },
+      );
+    }
+
+    const detectedMime = chunkValidation.mime || media.mime;
+    const detectedExt = chunkValidation.extension || media.extension;
+    const filename = MimeDetector.forgeFilename(media.title, media.quality, detectedExt);
 
     const headers = new Headers();
-    headers.set("Content-Type", mimeInfo.mime);
+    headers.set("Content-Type", detectedMime);
     headers.set("Content-Disposition", `attachment; filename="${filename}"`);
     headers.set("Accept-Ranges", "bytes");
 
@@ -80,12 +108,37 @@ export async function POST(request: Request) {
     const contentRange = upstream.headers.get("content-range");
     if (contentRange) headers.set("Content-Range", contentRange);
 
-    return new Response(upstream.body, {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(firstChunk);
+        function push() {
+          reader
+            .read()
+            .then(({ done, value }) => {
+              if (done) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(value);
+              push();
+            })
+            .catch((err) => {
+              controller.error(err);
+            });
+        }
+        push();
+      },
+      cancel() {
+        reader.cancel();
+      },
+    });
+
+    return new Response(stream, {
       status: upstream.status === 206 ? 206 : 200,
       headers,
     });
-  } catch (err) {
-    const message = err instanceof Error && err.name === "TimeoutError" ? "Download request timed out" : "Could not fetch media stream";
+  } catch (err: any) {
+    const message = err?.name === "TimeoutError" ? "Download request timed out" : "Could not fetch media stream";
     return NextResponse.json(
       { ok: false, error: { code: "UPSTREAM_ERROR", message } },
       { status: 502 },
