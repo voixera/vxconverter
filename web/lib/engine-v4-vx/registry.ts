@@ -3,6 +3,7 @@ import { YouTubeExtractor } from "./extractors/youtube";
 import { VimeoExtractor } from "./extractors/vimeo";
 import { TikTokExtractor } from "./extractors/tiktok";
 import { RedditExtractor } from "./extractors/reddit";
+import { MissavExtractor } from "./extractors/missav";
 import { DirectMediaExtractor } from "./extractors/direct-media";
 import { GenericExtractor } from "./extractors/generic";
 
@@ -13,11 +14,15 @@ export class ExtractorRegistry {
   private extractors: V4Extractor[] = [];
 
   constructor() {
+    // Register platform-specific extractors first (highest priority)
     this.extractors.push(new YouTubeExtractor());
     this.extractors.push(new VimeoExtractor());
     this.extractors.push(new TikTokExtractor());
     this.extractors.push(new RedditExtractor());
+    this.extractors.push(new MissavExtractor());
     this.extractors.push(new DirectMediaExtractor());
+
+    // Register generic fallback extractor last
     this.extractors.push(new GenericExtractor());
   }
 

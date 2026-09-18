@@ -6,6 +6,27 @@ import { HTML5Extractor } from "./html5";
 import { JsonLdExtractor } from "./jsonld";
 import type { MediaCandidate } from "../../types";
 
+function unpackJs(packed: string): string {
+  const match = /eval\(function\(p,a,c,k,e,[rd]\)\{.*\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)/.exec(packed);
+  if (!match) return "";
+  const [, p, aStr, cStr, kStr] = match;
+  const a = parseInt(aStr, 10);
+  const c = parseInt(cStr, 10);
+  const k = kStr.split("|");
+
+  function e(c: number): string {
+    return (c < a ? "" : e(Math.floor(c / a))) + ((c = c % a) > 35 ? String.fromCharCode(c + 29) : c.toString(36));
+  }
+
+  let count = c;
+  const dict: Record<string, string> = {};
+  while (count--) {
+    dict[e(count)] = k[count] || e(count);
+  }
+
+  return p.replace(/\b\w+\b/g, (w) => dict[w] || w);
+}
+
 /**
  * Engine V4 VX - Generic Fallback Web Page Extractor
  */
@@ -49,25 +70,9 @@ export class GenericExtractor implements V4Extractor {
       return { handled: true, provider: fetchRes.finalUrl.hostname, media };
     }
 
-    // 2. HTML text inspection (even if status is 403/404, check if HTML body contains media tags)
+    // 2. HTML text inspection
     if (fetchRes.html) {
       const html = fetchRes.html;
-
-      // Run OpenGraph, HTML5, and JSON-LD parsers
-      const ogResults = OpenGraphExtractor.parseHtml(html, fetchRes.finalUrl);
-      const html5Results = HTML5Extractor.parseHtml(html, fetchRes.finalUrl);
-      const jsonLdResults = JsonLdExtractor.parseHtml(html, fetchRes.finalUrl);
-
-      for (const item of [...ogResults, ...html5Results, ...jsonLdResults]) {
-        if (!seen.has(item.media_url)) {
-          seen.add(item.media_url);
-          media.push(item);
-        }
-      }
-
-      // 3. Fallback regex for inline .m3u8, .mp4, .webm in scripts
-      const directPattern = /(https?:\/\/[^\s"'<>\\]+?\.(?:m3u8|mp4|webm|mov|mp3|m4a|aac|wav|ogg|flac)(?:\?[^\s"'<>\\]*)?)/gi;
-      let match: RegExpExecArray | null;
 
       const pageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() || "Discovered Media";
       const ogImage = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|og:image:url|twitter:image)["'][^>]+content=["']([^"']+)["']/i)?.[1];
@@ -78,35 +83,59 @@ export class GenericExtractor implements V4Extractor {
         } catch {}
       }
 
-      while ((match = directPattern.exec(html))) {
-        const rawUrl = match[1];
-        let absUrl: string;
-        try {
-          absUrl = new URL(rawUrl, fetchRes.finalUrl).toString();
-        } catch {
-          continue;
+      // First, scan & unpack scripts for real stream URLs (highest priority)
+      const scriptRegex = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi;
+      const scripts = html.match(scriptRegex) || [];
+
+      for (const s of scripts) {
+        let scriptContent = s.replace(/^<script[^>]*>|<\/script>$/gi, "");
+        if (scriptContent.includes("eval(function(p,a,c,k,e,")) {
+          const unpacked = unpackJs(scriptContent);
+          if (unpacked) scriptContent = unpacked;
         }
 
-        if (!seen.has(absUrl)) {
-          seen.add(absUrl);
-          const mimeInfo = MimeDetector.resolve(absUrl);
-          media.push({
-            id: crypto.randomUUID(),
-            title: pageTitle,
-            source_url: ctx.url.toString(),
-            media_url: absUrl,
-            thumbnail_url: thumbnail,
-            mime: mimeInfo.mime,
-            extension: mimeInfo.extension,
-            width: null,
-            height: null,
-            duration: null,
-            filesize: null,
-            quality: "source",
-            kind: mimeInfo.kind,
-            playable: mimeInfo.playable,
-            is_direct: true,
-          });
+        const streamMatches = scriptContent.match(/https?:\/\/[^\s"'<>\\]+?\.(?:m3u8|mp4|webm|mov|mp3|m4a|aac|wav|ogg|flac)(?:\?[^\s"'<>\\]*)?/gi) || [];
+        for (const rawUrl of streamMatches) {
+          let cleanUrl = rawUrl.replace(/\\/g, "").replace(/['",;]+$/, "");
+          try {
+            cleanUrl = new URL(cleanUrl, fetchRes.finalUrl).toString();
+          } catch {
+            continue;
+          }
+
+          if (!seen.has(cleanUrl) && !cleanUrl.includes("/preview/")) {
+            seen.add(cleanUrl);
+            const mimeInfo = MimeDetector.resolve(cleanUrl);
+            media.push({
+              id: crypto.randomUUID(),
+              title: pageTitle,
+              source_url: ctx.rawUrl,
+              media_url: cleanUrl,
+              thumbnail_url: thumbnail,
+              mime: mimeInfo.mime,
+              extension: mimeInfo.extension,
+              width: null,
+              height: null,
+              duration: null,
+              filesize: null,
+              quality: "source",
+              kind: mimeInfo.kind,
+              playable: mimeInfo.playable,
+              is_direct: true,
+            });
+          }
+        }
+      }
+
+      // Next, run HTML5, JSON-LD, and OpenGraph parsers
+      const html5Results = HTML5Extractor.parseHtml(html, fetchRes.finalUrl);
+      const jsonLdResults = JsonLdExtractor.parseHtml(html, fetchRes.finalUrl);
+      const ogResults = OpenGraphExtractor.parseHtml(html, fetchRes.finalUrl);
+
+      for (const item of [...html5Results, ...jsonLdResults, ...ogResults]) {
+        if (!seen.has(item.media_url) && !item.media_url.includes("/preview/")) {
+          seen.add(item.media_url);
+          media.push(item);
         }
       }
     }
