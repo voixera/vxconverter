@@ -15,6 +15,8 @@ const { UrlNormalizer } = await import("../lib/engine-v4-vx/normalize.vxtest.mjs
 const { SecurityGuard } = await import("../lib/engine-v4-vx/guard.vxtest.mjs");
 const { MediaSniffer } = await import("../lib/engine-v4-vx/sniff.vxtest.mjs");
 const { MediaValidator } = await import("../lib/engine-v4-vx/validator.vxtest.mjs");
+const { MissavExtractor } = await import("../lib/engine-v4-vx/extractors/missav.vxtest.mjs");
+const { MISSVAV_HTML, REAL_UUID, DECOY_UUID } = await import("./fixtures/missav-packed.mjs");
 
 /* ---------------- URL normalization ---------------- */
 
@@ -180,4 +182,29 @@ test("validator: container mismatch detected (WebM expected as mp3)", () => {
 
 test("validator: empty buffer rejected", () => {
   assert.equal(MediaValidator.validateBuffer(Buffer.alloc(0)).valid, false);
+});
+
+/* ---------------- MissAV packed-player extraction ---------------- */
+
+test("missav: decodes the packed player and reads the REAL surrit URLs", () => {
+  const decoded = MissavExtractor.decodeDocument(MISSVAV_HTML);
+  const urls = MissavExtractor.surritUrls(decoded);
+  assert.ok(urls.length >= 1, "expected at least one surrit URL");
+  assert.ok(
+    urls.some((u) => u.includes(REAL_UUID) && u.endsWith("/playlist.m3u8")),
+    `expected playlist URL with real uuid, got: ${JSON.stringify(urls)}`,
+  );
+  assert.ok(
+    urls.some((u) => u.includes("/1080p/video.m3u8")),
+    "expected 1080p variant URL",
+  );
+});
+
+test("missav: never uses the decoy page uuid (user_uuid cookie)", () => {
+  const decoded = MissavExtractor.decodeDocument(MISSVAV_HTML);
+  const urls = MissavExtractor.surritUrls(decoded);
+  assert.ok(!urls.some((u) => u.includes(DECOY_UUID)), "decoy uuid leaked into stream URLs");
+  assert.equal(MissavExtractor.surritUuid(decoded), REAL_UUID);
+  // Sanity: the decoy really is present in the raw HTML, so this is a real guard.
+  assert.ok(MISSVAV_HTML.includes(DECOY_UUID));
 });

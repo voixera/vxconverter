@@ -12,7 +12,7 @@ import { CandidateFactory } from "../candidate";
 const MEDIA_EXT = "m3u8|mpd|mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|ts";
 const URL_RE = new RegExp(`https?://[^\\s"'<>\\\\)]+?\\.(?:${MEDIA_EXT})(?:\\?[^\\s"'<>\\\\)]*)?`, "gi");
 
-function unpackJs(packed: string): string {
+export function unpackJs(packed: string): string {
   const match = /eval\(function\(p,a,c,k,e,[rd]\)\{[\s\S]*?\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)/.exec(packed);
   if (!match) return "";
   const [, p, aStr, cStr, kStr] = match;
@@ -27,6 +27,32 @@ function unpackJs(packed: string): string {
   const dict: Record<string, string> = {};
   while (count--) dict[e(count)] = k[count] || e(count);
   return p.replace(/\b\w+\b/g, (w) => dict[w] || w);
+}
+
+/**
+ * Tolerant Dean-Edwards packer decoder. Handles the common variants used by
+ * streaming players (5-arg `function(p,a,c,k,e,d)` and the `p,a,c,k,e,r`
+ * form) and returns "" when the input is not a packed block.
+ */
+export function unpackPacker(source: string): string {
+  const match =
+    /eval\(function\(p,a,c,k,e,[dr]\)\{[\s\S]*?\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)/.exec(source);
+  if (!match) return "";
+  const [, p, aStr, cStr, kStr] = match;
+  const a = parseInt(aStr, 10);
+  const k = kStr.split("|");
+  const c = parseInt(cStr, 10);
+  if (!a || Number.isNaN(a)) return "";
+
+  function e(n: number): string {
+    return (n < a ? "" : e(Math.floor(n / a))) + ((n = n % a) > 35 ? String.fromCharCode(n + 29) : n.toString(36));
+  }
+  let count = c;
+  const dict: Record<string, string> = {};
+  while (count--) dict[e(count)] = k[count] || e(count);
+  const decoded = p.replace(/\b\w+\b/g, (w) => dict[w] || w);
+  // Unescape the string-literal escapes so URL matching works.
+  return decoded.replace(/\\\//g, "/").replace(/\\u002F/gi, "/").replace(/\\'/g, "'").replace(/\\"/g, '"');
 }
 
 export class ScriptScanner {
