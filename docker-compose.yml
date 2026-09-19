@@ -1,0 +1,28 @@
+# VX Converter - backend on your own Docker host (VPS / Railway / Render / Fly.io).
+#
+#   docker compose up -d --build
+#
+# The API is then served at http://<host>:3000/api/*.
+# Point the Vercel front-end at it by setting VX_API_BASE on Vercel
+# (see next.config.mjs rewrites).
+services:
+  vxconverter:
+    build: .
+    image: vxconverter:latest
+    container_name: vxconverter
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - YTDLP_PATH=/usr/local/bin/yt-dlp
+      - FFMPEG_PATH=/usr/bin/ffmpeg
+      # Optional: proxy/egress settings for yt-dlp if your host needs them.
+      # - HTTP_PROXY=http://user:pass@host:port
+      # - HTTPS_PROXY=http://user:pass@host:port
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

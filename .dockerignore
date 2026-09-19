@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.vercel
+npm-debug.log*
+*.log
+.env
+.env.local
+.env*.local
+tsconfig.tsbuildinfo
+web
+target
+tests

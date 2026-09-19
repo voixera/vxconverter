@@ -139,7 +139,11 @@ export class YouTubeExtractor implements V4Extractor {
 
     if (!(await ytdlpIsAvailable())) {
       // No extractor available — report truthfully, do not emit a fake entry.
-      const err: any = new Error("yt-dlp is not available in this environment to resolve YouTube streams");
+      const err: any = new Error(
+        "This server has no yt-dlp available to resolve YouTube streams. " +
+          "YouTube blocks datacenter IPs, so run the VX backend on a VPS/Docker host " +
+          "(which ships yt-dlp + ffmpeg) and point the front-end at it with VX_API_BASE.",
+      );
       err.code = "UNSUPPORTED_SOURCE";
       throw err;
     }
