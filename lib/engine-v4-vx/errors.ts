@@ -5,6 +5,7 @@
 export type EngineErrorCode =
   | "INVALID_URL"
   | "SSRF_BLOCKED"
+  | "BLOCKED_RESOURCE"
   | "SOURCE_NOT_FOUND"
   | "SOURCE_FETCH_FAILED"
   | "NO_MEDIA_FOUND"
@@ -27,6 +28,7 @@ const HTTP_STATUS: Record<string, number> = {
   INVALID_URL: 400,
   BAD_REQUEST: 400,
   SSRF_BLOCKED: 403,
+  BLOCKED_RESOURCE: 403,
   MEDIA_NOT_PUBLIC: 403,
   SOURCE_NOT_FOUND: 404,
   NO_MEDIA_FOUND: 404,
@@ -41,6 +43,21 @@ const HTTP_STATUS: Record<string, number> = {
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
 };
+
+/**
+ * Map an upstream HTTP failure to a truthful, specific error code instead of a
+ * blanket 502. A 403 from a CDN is "not public / blocked", not "our server is
+ * broken". A 404 is the source missing. A 429 is rate limiting.
+ */
+export function codeForUpstreamStatus(status: number, fallback = "SOURCE_FETCH_FAILED"): string {
+  if (status === 401) return "MEDIA_NOT_PUBLIC";
+  if (status === 403) return "BLOCKED_RESOURCE";
+  if (status === 404 || status === 410) return "SOURCE_NOT_FOUND";
+  if (status === 429) return "RATE_LIMITED";
+  if (status === 408 || status === 504) return "TIMEOUT";
+  if (status >= 500) return "SOURCE_FETCH_FAILED";
+  return fallback;
+}
 
 export function statusForCode(code: string): number {
   return HTTP_STATUS[code] ?? 500;

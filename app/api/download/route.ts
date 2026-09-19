@@ -3,12 +3,12 @@ import { getMediaById } from "../../../lib/store";
 import { DownloadResolver, ConvertTarget, YtdlpPipePlan, DirectPlan } from "../../../lib/engine-v4-vx/downloader";
 import { HlsFetcher } from "../../../lib/engine-v4-vx/hls";
 import { forgeDownloadName, asciiContentDisposition } from "../../../lib/engine-v4-vx/naming";
-import { EngineError, BROWSER_USER_AGENT } from "../../../lib/engine-v4-vx/fetcher";
+import { EngineError } from "../../../lib/engine-v4-vx/fetcher";
 import { SecurityGuard } from "../../../lib/engine-v4-vx/guard";
 import { MediaSniffer } from "../../../lib/engine-v4-vx/sniff";
 import { FfmpegAdapter } from "../../../lib/engine-v4-vx/ffmpeg";
 import { ytdlpStream } from "../../../lib/engine-v4-vx/ytdlp";
-import { ENGINE_NAME, statusForCode, toStructuredError } from "../../../lib/engine-v4-vx/errors";
+import { ENGINE_NAME, statusForCode, toStructuredError, codeForUpstreamStatus } from "../../../lib/engine-v4-vx/errors";
 import type { MediaCandidate } from "../../../lib/types";
 
 export const runtime = "nodejs";
@@ -118,7 +118,7 @@ async function streamHls(
   headers.set("Cache-Control", "no-store");
   headers.set("X-VX-Engine", ENGINE_NAME);
 
-  const fetchHeaders = { "User-Agent": BROWSER_USER_AGENT, Accept: "*/*", ...source.headers };
+  const fetchHeaders = { ...plan.headers };
   let sawBytes = false;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -127,7 +127,8 @@ async function streamHls(
         for (const segUrl of plan.segmentUrls) {
           if (!SecurityGuard.isUrlSafe(segUrl).safe) continue;
           let segRes = await fetch(segUrl, { headers: fetchHeaders, signal: AbortSignal.timeout(timeoutMs) }).catch(() => null);
-          if (segRes && segRes.status === 403) {
+          if (segRes && !segRes.ok) {
+            // Retry once with the segment's own origin as Referer/Origin.
             try {
               const origin = new URL(segUrl).origin;
               segRes = await fetch(segUrl, { headers: { ...fetchHeaders, Referer: origin + "/", Origin: origin }, signal: AbortSignal.timeout(timeoutMs) });

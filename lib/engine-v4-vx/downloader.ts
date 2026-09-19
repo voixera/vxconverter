@@ -12,6 +12,7 @@ import { ResilientFetcher, EngineError, BROWSER_USER_AGENT } from "./fetcher";
 import { MediaSniffer } from "./sniff";
 import { FfmpegAdapter } from "./ffmpeg";
 import { ytdlpGetFormats, ytdlpIsAvailable, needsYtdlp, YtdlpResolvedFormat } from "./ytdlp";
+import { codeForUpstreamStatus } from "./errors";
 import type { MediaCandidate } from "../types";
 
 export type ConvertTarget = "mp3" | "m4a" | "wav" | "mp4" | "webm";
@@ -231,10 +232,7 @@ export class DownloadResolver {
     }
 
     if (!response.ok || !response.body) {
-      const code =
-        response.status === 404 ? "SOURCE_NOT_FOUND" :
-        response.status === 403 ? "MEDIA_NOT_PUBLIC" :
-        response.status === 429 ? "RATE_LIMITED" : "SOURCE_FETCH_FAILED";
+      const code = codeForUpstreamStatus(response.status);
       throw new EngineError(code, `Upstream responded with HTTP ${response.status}`, response.status);
     }
 
@@ -317,10 +315,7 @@ export class DownloadResolver {
     });
 
     if (!res.ok || !res.body) {
-      const code =
-        res.status === 404 ? "SOURCE_NOT_FOUND" :
-        res.status === 403 ? "MEDIA_NOT_PUBLIC" :
-        res.status === 429 ? "RATE_LIMITED" : "SOURCE_FETCH_FAILED";
+      const code = codeForUpstreamStatus(res.status);
       throw new EngineError(code, `Upstream responded with HTTP ${res.status}`, res.status);
     }
 

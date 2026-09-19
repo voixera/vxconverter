@@ -77,6 +77,22 @@ export class ResilientFetcher {
   }
 
   /**
+   * Headers for fetching media playlists/segments (HLS/DASH/progressive).
+   * These mirror a cross-site <video>/fetch request so CDNs that inspect
+   * Sec-Fetch-* / Accept-Language (Cloudflare-fronted hosts) accept them.
+   */
+  public static mediaHeaders(userAgent = BROWSER_USER_AGENT): Record<string, string> {
+    return {
+      "User-Agent": userAgent,
+      Accept: "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "cross-site",
+    };
+  }
+
+  /**
    * Fetch a URL following redirects manually, validating each hop for SSRF.
    */
   public static async fetch(

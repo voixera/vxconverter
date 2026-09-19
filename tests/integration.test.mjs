@@ -265,6 +265,32 @@ test("download: missing media → structured MEDIA_NOT_FOUND", async () => {
   assert.equal(json.error.code, "MEDIA_NOT_FOUND");
 });
 
+/* ---------------- Download: HLS ---------------- */
+
+test("download: HLS master playlist is assembled into a single MP4", async () => {
+  const { res, isJson, bytes } = await download({ media: {
+    id: "h1", title: "HLS Test", source_url: `${fx}/master.m3u8`, media_url: `${fx}/master.m3u8`,
+    thumbnail_url: null, mime: "application/vnd.apple.mpegurl", extension: "m3u8", width: null, height: null,
+    duration: null, filesize: null, quality: "source", kind: "stream", playable: false, is_direct: true,
+  } });
+  assert.equal(isJson, false);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "video/mp4");
+  assert.ok(bytes.length >= 376, "expected both TS segments to be concatenated");
+  assert.equal(bytes[0], 0x47, "expected MPEG-TS sync byte");
+});
+
+test("download: HLS playlist 403 → truthful BLOCKED_RESOURCE (not a blanket 502)", async () => {
+  const { res, isJson, json } = await download({ media: {
+    id: "h2", title: "Forbidden HLS", source_url: `${fx}/forbidden.m3u8`, media_url: `${fx}/forbidden.m3u8`,
+    thumbnail_url: null, mime: "application/vnd.apple.mpegurl", extension: "m3u8", width: null, height: null,
+    duration: null, filesize: null, quality: "source", kind: "stream", playable: false, is_direct: true,
+  } });
+  assert.equal(isJson, true);
+  assert.equal(res.status, 403);
+  assert.equal(json.error.code, "BLOCKED_RESOURCE");
+});
+
 test("download: SSRF target blocked at download time", async () => {
   const { res, json } = await download({ media: {
     id: "t6", title: "SSRF", source_url: "http://169.254.169.254/", media_url: "http://169.254.169.254/latest/meta-data/",

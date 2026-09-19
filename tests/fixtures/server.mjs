@@ -145,6 +145,22 @@ export function createFixtureServer() {
         return res.end();
       case "/status-500":
         return send(500, "text/html", "<html>Internal error</html>");
+      case "/forbidden.m3u8":
+        // Public-looking HLS playlist that the CDN refuses (403).
+        return send(403, "text/html", "<html>Forbidden</html>");
+      case "/master.m3u8":
+        return send(
+          200,
+          "application/vnd.apple.mpegurl",
+          "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nv1.m3u8\n",
+        );
+      case "/v1.m3u8":
+        return send(200, "application/vnd.apple.mpegurl", "#EXTM3U\n#EXT-X-TARGETDURATION:4\nseg0.ts\nseg1.ts\n");
+      case "/seg0.ts":
+      case "/seg1.ts": {
+        const ts = Buffer.concat([Buffer.from([0x47]), Buffer.alloc(187, 0x00)]);
+        return send(200, "video/mp2t", ts);
+      }
       case "/missing.mp4":
         return send(404, "text/html", "<html>not found</html>");
       case "/slow":

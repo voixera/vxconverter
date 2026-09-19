@@ -3,17 +3,25 @@
  *
  * Fetches a master/media playlist, resolves relative segment URLs, and returns
  * an ordered list of absolute segment URLs. Callers stream them in order.
- * Handles variant selection (highest bandwidth) and basic 403 retry with a
- * playlist-origin Referer for publicly accessible CDNs.
+ *
+ * Many public CDNs (e.g. surrit.com behind Cloudflare) refuse a bare request
+ * and require a browser-like Referer/Origin that points at the page which
+ * embedded the stream. We therefore try a small, ordered set of header
+ * strategies and keep the first that succeeds. This is standard browser
+ * behaviour, never an access-control bypass: if every strategy is rejected we
+ * surface a truthful structured error.
  */
 
 import { SecurityGuard } from "./guard";
-import { EngineError, BROWSER_USER_AGENT } from "./fetcher";
+import { EngineError, BROWSER_USER_AGENT, ResilientFetcher } from "./fetcher";
+import { codeForUpstreamStatus } from "./errors";
 
 export interface HlsPlan {
   playlistUrl: string;
   segmentUrls: string[];
   isMaster: boolean;
+  /** Headers that successfully fetched the playlist (reused for segments). */
+  headers: Record<string, string>;
 }
 
 function assertSafe(url: string): void {
@@ -21,25 +29,102 @@ function assertSafe(url: string): void {
   if (!check.safe) throw new EngineError("SSRF_BLOCKED", "Blocked: unsafe segment destination");
 }
 
-async function fetchText(url: string, headers: Record<string, string>, timeoutMs: number): Promise<string> {
-  assertSafe(url);
-  let res = await fetch(url, { headers, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) }).catch((e: any) => {
-    throw new EngineError("SOURCE_FETCH_FAILED", `Playlist fetch failed: ${e?.message || "network error"}`);
-  });
-  if (res.status === 403) {
-    try {
-      const origin = new URL(url).origin;
-      res = await fetch(url, { headers: { ...headers, Referer: origin + "/", Origin: origin }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
-    } catch {}
+/**
+ * Build an ordered list of header variants to try. Each variant is a full
+ * browser-like header set plus a Referer/Origin combination.
+ */
+function headerStrategies(
+  targetUrl: string,
+  extraHeaders: Record<string, string>,
+): Record<string, string>[] {
+  const base = ResilientFetcher.mediaHeaders(BROWSER_USER_AGENT);
+  const providedReferer = extraHeaders.Referer || extraHeaders.referer;
+  const providedOrigin = extraHeaders.Origin || extraHeaders.origin;
+
+  let playlistOrigin = "";
+  try { playlistOrigin = new URL(targetUrl).origin; } catch {}
+
+  const variants: Record<string, string>[] = [];
+
+  // 1. Caller-provided headers (usually the embedding page URL as Referer).
+  variants.push({ ...base, ...extraHeaders });
+
+  // 2. Playlist's own origin as Referer/Origin.
+  if (playlistOrigin) {
+    variants.push({ ...base, ...extraHeaders, Referer: playlistOrigin + "/", Origin: playlistOrigin });
   }
-  if (!res.ok) throw new EngineError("SOURCE_FETCH_FAILED", `Playlist responded HTTP ${res.status}`, res.status);
-  return res.text();
+
+  // 3. Provided Referer + its Origin (explicit, in case extraHeaders had only one).
+  if (providedReferer) {
+    let origin = providedOrigin;
+    if (!origin) { try { origin = new URL(providedReferer).origin; } catch {} }
+    variants.push({ ...base, ...extraHeaders, Referer: providedReferer, ...(origin ? { Origin: origin } : {}) });
+  }
+
+  // 4. No Referer/Origin at all (some CDNs reject a foreign Referer outright).
+  const bare = { ...base };
+  delete (bare as any).Referer;
+  delete (bare as any).Origin;
+  variants.push(bare);
+
+  // De-duplicate identical header sets while preserving priority order.
+  const seen = new Set<string>();
+  return variants.filter((v) => {
+    const key = JSON.stringify(Object.entries(v).sort());
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+interface PlaylistFetch {
+  text: string;
+  headers: Record<string, string>;
+}
+
+async function fetchPlaylist(
+  url: string,
+  extraHeaders: Record<string, string>,
+  timeoutMs: number,
+): Promise<PlaylistFetch> {
+  assertSafe(url);
+  const strategies = headerStrategies(url, extraHeaders);
+  let lastStatus = 0;
+
+  for (const headers of strategies) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers,
+        redirect: "follow",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e: any) {
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+        throw new EngineError("TIMEOUT", "Playlist request timed out");
+      }
+      // Network failure — remember and try the next strategy.
+      lastStatus = lastStatus || 0;
+      continue;
+    }
+    if (res.ok) {
+      const text = await res.text();
+      return { text, headers };
+    }
+    lastStatus = res.status;
+    // A 404/410/429/5xx will not be fixed by changing headers — stop early.
+    if ([404, 410, 429].includes(res.status) || res.status >= 500) break;
+  }
+
+  const code = codeForUpstreamStatus(lastStatus, "SOURCE_FETCH_FAILED");
+  throw new EngineError(code, `Playlist responded HTTP ${lastStatus || "error"}`, lastStatus || undefined);
 }
 
 export class HlsFetcher {
   public static async plan(masterUrl: string, extraHeaders: Record<string, string> = {}, timeoutMs = 30000): Promise<HlsPlan> {
-    const headers = { "User-Agent": BROWSER_USER_AGENT, Accept: "*/*", ...extraHeaders };
-    let text = await fetchText(masterUrl, headers, timeoutMs);
+    const first = await fetchPlaylist(masterUrl, extraHeaders, timeoutMs);
+    let text = first.text;
+    const headers = first.headers;
     let playlistUrl = masterUrl;
     let isMaster = false;
 
@@ -61,7 +146,8 @@ export class HlsFetcher {
       }
       if (bestUrl) {
         playlistUrl = bestUrl;
-        text = await fetchText(playlistUrl, headers, timeoutMs);
+        const sub = await fetchPlaylist(playlistUrl, extraHeaders, timeoutMs);
+        text = sub.text;
       }
     }
 
@@ -79,6 +165,6 @@ export class HlsFetcher {
       throw new EngineError("MEDIA_VALIDATION_FAILED", "HLS playlist contained no media segments");
     }
 
-    return { playlistUrl, segmentUrls, isMaster };
+    return { playlistUrl, segmentUrls, isMaster, headers };
   }
 }
