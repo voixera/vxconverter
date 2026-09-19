@@ -1,9 +1,9 @@
 import { EngineContext, ExtractorResult, V4Extractor } from "../types";
-import { MimeDetector } from "../mime";
+import { CandidateFactory, dedupeCandidates } from "../candidate";
 import type { MediaCandidate } from "../../types";
 
 /**
- * Engine V4 VX - JSON-LD Schema.org Video/Audio Extractor
+ * ENGINE V4 VX - JSON-LD Schema.org Video/Audio Extractor
  */
 export class JsonLdExtractor implements V4Extractor {
   public name = "JsonLdExtractor";
@@ -14,69 +14,51 @@ export class JsonLdExtractor implements V4Extractor {
 
   public static parseHtml(html: string, base: URL): MediaCandidate[] {
     const media: MediaCandidate[] = [];
-    const seen = new Set<string>();
-
     const jsonLdPattern = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
     let match: RegExpExecArray | null;
+
+    const visit = (obj: any) => {
+      if (!obj || typeof obj !== "object") return;
+      const type = obj["@type"];
+      if (type === "VideoObject" || type === "AudioObject" || type === "Clip") {
+        const contentUrl = obj.contentUrl || obj.embedUrl || obj.url;
+        if (contentUrl && typeof contentUrl === "string") {
+          let abs: string;
+          try { abs = new URL(contentUrl, base).toString(); } catch { return; }
+          const thumbRaw = Array.isArray(obj.thumbnailUrl) ? obj.thumbnailUrl[0] : obj.thumbnailUrl;
+          let thumb: string | null = null;
+          if (thumbRaw) { try { thumb = new URL(thumbRaw, base).toString(); } catch {} }
+          media.push(
+            CandidateFactory.make({
+              url: abs,
+              title: obj.name || obj.headline || "Video",
+              sourceUrl: base.toString(),
+              thumbnail: thumb,
+              mime: type === "AudioObject" ? "audio/mpeg" : undefined,
+              width: obj.width ? Number(obj.width) : null,
+              height: obj.height ? Number(obj.height) : null,
+              quality: obj.height ? `${obj.height}p` : "source",
+              source: "json-ld",
+              platform: base.hostname,
+            }),
+          );
+        }
+      }
+      for (const key of Object.keys(obj)) {
+        const v = obj[key];
+        if (Array.isArray(v)) v.forEach(visit);
+        else if (v && typeof v === "object") visit(v);
+      }
+    };
 
     while ((match = jsonLdPattern.exec(html))) {
       try {
         const parsed = JSON.parse(match[1]);
-        const list = Array.isArray(parsed) ? parsed : [parsed];
-
-        for (const item of list) {
-          const items = item["@graph"] ? (Array.isArray(item["@graph"]) ? item["@graph"] : [item["@graph"]]) : [item];
-
-          for (const obj of items) {
-            if (obj && (obj["@type"] === "VideoObject" || obj["@type"] === "AudioObject")) {
-              const contentUrl = obj.contentUrl || obj.embedUrl;
-              if (!contentUrl) continue;
-
-              let absUrl: string;
-              try {
-                absUrl = new URL(contentUrl, base).toString();
-              } catch {
-                continue;
-              }
-
-              if (!seen.has(absUrl)) {
-                seen.add(absUrl);
-                const title = obj.name || obj.headline || "Video";
-                const thumbRaw = Array.isArray(obj.thumbnailUrl) ? obj.thumbnailUrl[0] : obj.thumbnailUrl;
-                let thumb: string | null = null;
-                if (thumbRaw) {
-                  try {
-                    thumb = new URL(thumbRaw, base).toString();
-                  } catch {}
-                }
-
-                const mimeInfo = MimeDetector.resolve(absUrl, obj["@type"] === "AudioObject" ? "audio/mpeg" : "video/mp4");
-
-                media.push({
-                  id: crypto.randomUUID(),
-                  title,
-                  source_url: base.toString(),
-                  media_url: absUrl,
-                  thumbnail_url: thumb,
-                  mime: mimeInfo.mime,
-                  extension: mimeInfo.extension,
-                  width: obj.width ? Number(obj.width) : null,
-                  height: obj.height ? Number(obj.height) : null,
-                  duration: null,
-                  filesize: null,
-                  quality: obj.height ? `${obj.height}p` : "source",
-                  kind: mimeInfo.kind,
-                  playable: mimeInfo.playable,
-                  is_direct: true,
-                });
-              }
-            }
-          }
-        }
+        (Array.isArray(parsed) ? parsed : [parsed]).forEach(visit);
       } catch {}
     }
 
-    return media;
+    return dedupeCandidates(media);
   }
 
   public async extract(ctx: EngineContext): Promise<ExtractorResult | null> {
@@ -84,11 +66,9 @@ export class JsonLdExtractor implements V4Extractor {
       headers: { "User-Agent": ctx.userAgent },
       signal: AbortSignal.timeout(ctx.timeoutMs),
     }).catch(() => null);
-
     if (!res || !res.ok) return null;
     const html = await res.text().catch(() => "");
     const media = JsonLdExtractor.parseHtml(html, ctx.url);
-
     return media.length ? { handled: true, provider: ctx.url.hostname, media } : null;
   }
 }

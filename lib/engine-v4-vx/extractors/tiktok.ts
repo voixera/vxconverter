@@ -1,153 +1,82 @@
 import { EngineContext, ExtractorResult, V4Extractor } from "../types";
+import { CandidateFactory } from "../candidate";
+import { ytdlpIsAvailable, ytdlpGetInfo } from "../ytdlp";
+import { YouTubeExtractor } from "./youtube";
 import type { MediaCandidate } from "../../types";
 
 /**
- * Engine V4 VX - TikTok Extractor
- * Fetches page HTML and extracts real CDN video URL from __UNIVERSAL_DATA__ / SIGI_STATE JSON.
+ * ENGINE V4 VX - TikTok Extractor
+ *
+ * Prefers yt-dlp (handles signing). Falls back to parsing the page's embedded
+ * JSON. Never returns the source URL as a fake "downloadable" candidate.
  */
 export class TikTokExtractor implements V4Extractor {
   public name = "TikTokExtractor";
 
   public canHandle(url: URL): boolean {
-    const host = url.hostname.toLowerCase();
-    return host.includes("tiktok.com");
+    return url.hostname.toLowerCase().includes("tiktok.com");
   }
 
   public async extract(ctx: EngineContext): Promise<ExtractorResult | null> {
-    // oEmbed for title/thumbnail (lightweight, always works)
-    const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(ctx.rawUrl)}`;
-    const oembedRes = await fetch(oembedUrl, { signal: AbortSignal.timeout(ctx.timeoutMs) }).catch(() => null);
-    const oembedData = oembedRes && oembedRes.ok ? await oembedRes.json().catch(() => null) : null;
+    const media: MediaCandidate[] = [];
 
-    const title = oembedData?.title || "TikTok Video";
-    const thumbnail = oembedData?.thumbnail_url || null;
-
-    // Fetch the TikTok page to extract the real CDN URL from embedded JSON
-    const pageRes = await fetch(ctx.rawUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://www.tiktok.com/",
-      },
-      signal: AbortSignal.timeout(ctx.timeoutMs),
-    }).catch(() => null);
-
-    if (!pageRes || !pageRes.ok) {
-      // Can't fetch page — return original URL as best-effort (will fail at download)
-      return {
-        handled: true,
-        provider: "tiktok.com",
-        media: [
-          {
-            id: crypto.randomUUID(),
-            title,
-            source_url: ctx.rawUrl,
-            media_url: ctx.rawUrl,
-            thumbnail_url: thumbnail,
-            mime: "video/mp4",
-            extension: "mp4",
-            width: 1080,
-            height: 1920,
-            duration: null,
-            filesize: null,
-            quality: "HD",
-            kind: "video",
-            playable: true,
-            is_direct: false,
-          },
-        ],
-      };
-    }
-
-    const html = await pageRes.text().catch(() => "");
-
-    // Try to extract from __UNIVERSAL_DATA__ (newer TikTok pages)
-    let videoUrl: string | null = null;
-    let noWatermarkUrl: string | null = null;
-
-    const universalMatch = html.match(/<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([^<]+)<\/script>/);
-    if (universalMatch) {
+    // 1. yt-dlp first — most reliable for public TikToks.
+    if (await ytdlpIsAvailable()) {
       try {
-        const json = JSON.parse(universalMatch[1]);
-        // Navigate the nested structure
-        const defaultScope = json?.["__DEFAULT_SCOPE__"];
-        const videoDetail =
-          defaultScope?.["webapp.video-detail"]?.itemInfo?.itemStruct?.video;
-        if (videoDetail) {
-          videoUrl = videoDetail.downloadAddr || videoDetail.playAddr || null;
-          noWatermarkUrl = videoDetail.downloadAddr || null;
-        }
+        const info = await ytdlpGetInfo(ctx.rawUrl, ctx.timeoutMs > 15000 ? ctx.timeoutMs : 30000);
+        media.push(...YouTubeExtractor.buildCandidates(info, ctx.rawUrl));
       } catch {}
     }
 
-    // Fallback: SIGI_STATE
-    if (!videoUrl) {
-      const sigiMatch = html.match(/<script[^>]*id="SIGI_STATE"[^>]*>([^<]+)<\/script>/);
-      if (sigiMatch) {
-        try {
-          const json = JSON.parse(sigiMatch[1]);
-          const items = json?.ItemModule;
-          if (items) {
-            const first = Object.values(items)[0] as any;
-            videoUrl = first?.video?.downloadAddr || first?.video?.playAddr || null;
-          }
-        } catch {}
+    // 2. HTML parse fallback.
+    if (media.length === 0) {
+      const pageRes = await fetch(ctx.rawUrl, {
+        headers: {
+          "User-Agent": ctx.userAgent,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://www.tiktok.com/",
+        },
+        signal: AbortSignal.timeout(ctx.timeoutMs),
+      }).catch(() => null);
+
+      const oembedRes = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(ctx.rawUrl)}`, {
+        signal: AbortSignal.timeout(ctx.timeoutMs),
+      }).catch(() => null);
+      const oembed = oembedRes && oembedRes.ok ? await oembedRes.json().catch(() => null) : null;
+      const title = oembed?.title || "TikTok Video";
+      const thumbnail = oembed?.thumbnail_url || null;
+
+      if (pageRes && pageRes.ok) {
+        const html = await pageRes.text().catch(() => "");
+        let videoUrl: string | null = null;
+        const universal = html.match(/<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+        if (universal) {
+          try {
+            const json = JSON.parse(universal[1]);
+            const v = json?.["__DEFAULT_SCOPE__"]?.["webapp.video-detail"]?.itemInfo?.itemStruct?.video;
+            videoUrl = v?.downloadAddr || v?.playAddr || null;
+          } catch {}
+        }
+        if (!videoUrl) {
+          const m = html.match(/"downloadAddr"\s*:\s*"([^"]+)"/) || html.match(/"playAddr"\s*:\s*"([^"]+)"/);
+          if (m) videoUrl = m[1].replace(/\\u002F/g, "/").replace(/\\/g, "");
+        }
+        if (videoUrl) {
+          media.push(CandidateFactory.make({
+            url: videoUrl, title, sourceUrl: ctx.rawUrl, thumbnail,
+            mime: "video/mp4", extension: "mp4", quality: "HD",
+            kind: "video", playable: true, isDirect: true, source: "tiktok", platform: "tiktok.com",
+          }));
+        }
       }
     }
 
-    // Fallback: regex hunt for cdn .mp4 in page
-    if (!videoUrl) {
-      const cdnMatch = html.match(/"downloadAddr"\s*:\s*"([^"]+)"/);
-      videoUrl = cdnMatch ? cdnMatch[1].replace(/\\u002F/g, "/").replace(/\\/g, "") : null;
+    if (media.length === 0) {
+      const err: any = new Error("No public downloadable stream found for this TikTok");
+      err.code = "NO_MEDIA_FOUND";
+      throw err;
     }
-    if (!videoUrl) {
-      const playMatch = html.match(/"playAddr"\s*:\s*"([^"]+)"/);
-      videoUrl = playMatch ? playMatch[1].replace(/\\u002F/g, "/").replace(/\\/g, "") : null;
-    }
-
-    const media: MediaCandidate[] = [];
-    if (videoUrl) {
-      media.push({
-        id: crypto.randomUUID(),
-        title,
-        source_url: ctx.rawUrl,
-        media_url: videoUrl,
-        thumbnail_url: thumbnail,
-        mime: "video/mp4",
-        extension: "mp4",
-        width: 1080,
-        height: 1920,
-        duration: null,
-        filesize: null,
-        quality: "HD",
-        kind: "video",
-        playable: true,
-        is_direct: true,
-      });
-    } else {
-      // ponytail: couldn't parse CDN URL — TikTok changed page structure
-      // Upgrade: use a dedicated TikTok API wrapper or yt-dlp subprocess
-      media.push({
-        id: crypto.randomUUID(),
-        title,
-        source_url: ctx.rawUrl,
-        media_url: ctx.rawUrl,
-        thumbnail_url: thumbnail,
-        mime: "video/mp4",
-        extension: "mp4",
-        width: 1080,
-        height: 1920,
-        duration: null,
-        filesize: null,
-        quality: "HD",
-        kind: "video",
-        playable: true,
-        is_direct: false,
-      });
-    }
-
     return { handled: true, provider: "tiktok.com", media };
   }
 }

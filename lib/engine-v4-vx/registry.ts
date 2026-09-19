@@ -8,25 +8,31 @@ import { DirectMediaExtractor } from "./extractors/direct-media";
 import { GenericExtractor } from "./extractors/generic";
 
 /**
- * Engine V4 VX - Extractor Registry
+ * ENGINE V4 VX - Extractor Registry
+ *
+ * Order matters: direct-media and platform extractors run before the generic
+ * fallback. The generic extractor always runs last as the universal path.
  */
 export class ExtractorRegistry {
-  private extractors: V4Extractor[] = [];
+  private extractors: V4Extractor[];
 
   constructor() {
-    // Register platform-specific extractors first (highest priority)
-    this.extractors.push(new YouTubeExtractor());
-    this.extractors.push(new VimeoExtractor());
-    this.extractors.push(new TikTokExtractor());
-    this.extractors.push(new RedditExtractor());
-    this.extractors.push(new MissavExtractor());
-    this.extractors.push(new DirectMediaExtractor());
-
-    // Register generic fallback extractor last
-    this.extractors.push(new GenericExtractor());
+    this.extractors = [
+      new DirectMediaExtractor(),
+      new YouTubeExtractor(),
+      new VimeoExtractor(),
+      new TikTokExtractor(),
+      new RedditExtractor(),
+      new MissavExtractor(),
+      new GenericExtractor(),
+    ];
   }
 
   public getExtractorsFor(url: URL): V4Extractor[] {
     return this.extractors.filter((ext) => ext.canHandle(url));
+  }
+
+  public all(): V4Extractor[] {
+    return [...this.extractors];
   }
 }

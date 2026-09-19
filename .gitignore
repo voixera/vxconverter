@@ -11,5 +11,11 @@
 *.log
 *.tmp
 
+# Engine V4 VX test transpile artifacts
+*.vxtest.mjs
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 .vercel
 .env*.local

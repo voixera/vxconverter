@@ -6,7 +6,11 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "web:build": "npm --prefix web run build"
+    "typecheck": "tsc --noEmit",
+    "web:build": "npm --prefix web run build",
+    "test:unit": "node --test tests/unit.test.mjs",
+    "test:integration": "node --test tests/integration.test.mjs",
+    "test": "node --test tests/unit.test.mjs tests/integration.test.mjs"
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",

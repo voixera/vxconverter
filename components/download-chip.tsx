@@ -18,6 +18,7 @@ export function DownloadChip({ mediaId, media, filename, filesize, mime }: Downl
   const [state, setState] = useState<"idle" | "downloading" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
+  const [target, setTarget] = useState<"source" | "mp3" | "m4a" | "mp4">("source");
 
   const formatSize = (bytes: number | null) => {
     if (!bytes) return null;
@@ -33,14 +34,20 @@ export function DownloadChip({ mediaId, media, filename, filesize, mime }: Downl
     setState("downloading");
 
     try {
-      await triggerDownload(media || mediaId, filename, (loaded, total) => {
-        if (total) {
-          const pct = Math.round((loaded / total) * 100);
-          setProgress(`${pct}%`);
-        } else {
-          setProgress(`${formatSize(loaded) ?? "..."}`);
-        }
-      });
+      const convert = target === "source" ? null : target;
+      await triggerDownload(
+        media || mediaId,
+        filename,
+        (loaded, total) => {
+          if (total) {
+            const pct = Math.round((loaded / total) * 100);
+            setProgress(`${pct}%`);
+          } else {
+            setProgress(`${formatSize(loaded) ?? "..."}`);
+          }
+        },
+        convert,
+      );
       setState("done");
       setTimeout(() => setState("idle"), 4000);
     } catch (e: any) {
@@ -55,7 +62,20 @@ export function DownloadChip({ mediaId, media, filename, filesize, mime }: Downl
 
   return (
     <div className="flex flex-col items-end gap-1.5">
-      <motion.button
+      <div className="flex items-center gap-1.5">
+        <select
+          value={target}
+          onChange={(e) => setTarget(e.target.value as any)}
+          disabled={state === "downloading"}
+          className="rounded-lg bg-white/[0.04] border border-white/[0.08] text-white/60 font-mono text-[10px] px-1.5 py-1.5 outline-none hover:border-white/[0.15] disabled:opacity-40"
+          title="Output format (MP3/MP4 require ffmpeg on the server)"
+        >
+          <option value="source">Source</option>
+          <option value="mp3">MP3</option>
+          <option value="m4a">M4A</option>
+          <option value="mp4">MP4</option>
+        </select>
+        <motion.button
         whileTap={{ scale: 0.94 }}
         onClick={handleDownload}
         disabled={state === "downloading"}
@@ -101,6 +121,7 @@ export function DownloadChip({ mediaId, media, filename, filesize, mime }: Downl
           </>
         )}
       </motion.button>
+      </div>
 
       <AnimatePresence>
         {error && (

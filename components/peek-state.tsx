@@ -9,6 +9,22 @@ interface PeekStateProps {
   onClose?: () => void;
 }
 
+/** Route playback through the Engine V4 VX relay (supports Range) so previews
+ * work even when the CDN blocks direct hotlinking. */
+function relayUrl(media: MediaCandidate): string {
+  const params = new URLSearchParams({
+    media_id: media.id,
+    media_url: media.media_url,
+    source_url: media.source_url,
+    mime: media.mime,
+    extension: media.extension,
+    kind: typeof media.kind === "string" ? media.kind : "video",
+    title: media.title,
+    quality: media.quality,
+  });
+  return `/api/download?${params.toString()}`;
+}
+
 export function PeekState({ media, onClose }: PeekStateProps) {
   const [playbackFailed, setPlaybackFailed] = useState(false);
 
@@ -20,6 +36,7 @@ export function PeekState({ media, onClose }: PeekStateProps) {
 
   const isAudio = media.kind === "audio" || media.mime.startsWith("audio/");
   const isPlayable = media.playable !== false && !isEmbed;
+  const playSrc = isEmbed ? media.media_url : relayUrl(media);
 
   return (
     <div className="w-full bg-vx-bg-elevated border border-vx-border-light/80 rounded-xl overflow-hidden shadow-2xl animate-fade-in vx-corner-mark">
@@ -51,7 +68,7 @@ export function PeekState({ media, onClose }: PeekStateProps) {
       <div className="relative bg-black flex items-center justify-center min-h-[260px] max-h-[480px]">
         {isEmbed ? (
           <iframe
-            src={media.media_url}
+            src={playSrc}
             className="w-full h-[320px] sm:h-[440px] border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
@@ -76,7 +93,7 @@ export function PeekState({ media, onClose }: PeekStateProps) {
               onError={() => setPlaybackFailed(true)}
               className="w-full max-w-md accent-vx-accent"
             >
-              <source src={media.media_url} type={media.mime} />
+              <source src={playSrc} type={media.mime} />
               Your browser does not support HTML5 audio playback.
             </audio>
           </div>
@@ -89,7 +106,7 @@ export function PeekState({ media, onClose }: PeekStateProps) {
             onError={() => setPlaybackFailed(true)}
             className="w-full h-full max-h-[480px] object-contain"
           >
-            <source src={media.media_url} type={media.mime} />
+            <source src={playSrc} type={media.mime} />
             Your browser does not support HTML5 video preview.
           </video>
         ) : media.thumbnail_url ? (

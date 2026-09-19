@@ -1,168 +1,152 @@
 import { NextResponse } from "next/server";
 import { getMediaById } from "../../../lib/store";
+import { DownloadResolver, ConvertTarget, YtdlpPipePlan, DirectPlan } from "../../../lib/engine-v4-vx/downloader";
+import { HlsFetcher } from "../../../lib/engine-v4-vx/hls";
+import { forgeDownloadName, asciiContentDisposition } from "../../../lib/engine-v4-vx/naming";
+import { EngineError, BROWSER_USER_AGENT } from "../../../lib/engine-v4-vx/fetcher";
 import { SecurityGuard } from "../../../lib/engine-v4-vx/guard";
-import { MimeDetector } from "../../../lib/engine-v4-vx/mime";
-import { MediaValidator } from "../../../lib/engine-v4-vx/validator";
-import { ytdlpGetFormats, needsYtdlp } from "../../../lib/engine-v4-vx/ytdlp";
+import { MediaSniffer } from "../../../lib/engine-v4-vx/sniff";
+import { FfmpegAdapter } from "../../../lib/engine-v4-vx/ffmpeg";
+import { ytdlpStream } from "../../../lib/engine-v4-vx/ytdlp";
+import { ENGINE_NAME, statusForCode, toStructuredError } from "../../../lib/engine-v4-vx/errors";
 import type { MediaCandidate } from "../../../lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Standard modern browser headers
-const BROWSER_HEADERS: Record<string, string> = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Sec-Fetch-Dest": "empty",
-  "Sec-Fetch-Mode": "cors",
-  "Sec-Fetch-Site": "cross-site",
-};
+const VALID_TARGETS: ConvertTarget[] = ["mp3", "m4a", "wav", "mp4", "webm"];
 
-function sanitizeFilename(title: string, quality: string, ext: string): string {
-  const cleanTitle =
-    (title || "vx-media")
-      .replace(/\s*\(\s*\d{3,4}p[^)]*\)\s*$/, "")
-      .replace(/\s*\(Audio\)\s*$/, "")
-      .replace(/\s*\(Embed[^)]*\)\s*$/, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 72) || "vx-media";
-  const q = quality && quality !== "source" ? `-${quality}` : "";
-  return `${cleanTitle}${q}.${ext}`;
+function errorResponse(err: unknown) {
+  const { code, message } = toStructuredError(err);
+  return NextResponse.json({ ok: false, engine: ENGINE_NAME, error: { code, message } }, { status: statusForCode(code) });
 }
 
-/**
- * Parses HLS (.m3u8) master or media playlist, extracts all TS/MP4 segments,
- * and streams them consecutively into a single unified video file response.
- */
-async function streamHlsSegments(
-  masterUrl: string,
-  fetchHeaders: Record<string, string>,
+/** Build the streaming Response for a validated direct media source. */
+async function streamDirect(
+  source: Awaited<ReturnType<typeof DownloadResolver.resolveSource>>,
+  request: Request,
   filename: string,
+  convertTo: ConvertTarget | null,
+  timeoutMs: number,
 ): Promise<Response> {
-  let res = await fetch(masterUrl, {
-    headers: fetchHeaders,
-    signal: AbortSignal.timeout(30000),
+  const range = request.headers.get("range");
+
+  // Config: HLS is assembled server-side.
+  if (source.hintExtension === "m3u8" || (source.hintMime || "").includes("mpegurl") || /\.m3u8(\?|$)/i.test(source.url)) {
+    return streamHls(source, filename, timeoutMs);
+  }
+
+  // Conversion path: download fully, transcode, validate, then respond.
+  if (convertTo) {
+    const dl = await DownloadResolver.downloadFull(source, { timeoutMs: Math.max(timeoutMs, 180000) });
+    const out = await DownloadResolver.convertBuffer(dl.buffer, dl.extension, convertTo, 180000);
+    const finalName = filename.replace(/\.[^.]+$/, "") + "." + out.extension;
+    return new Response(new Uint8Array(out.buffer), {
+      status: 200,
+      headers: {
+        "Content-Type": out.mime,
+        "Content-Length": String(out.buffer.length),
+        "Content-Disposition": asciiContentDisposition(finalName),
+        "Cache-Control": "no-store",
+        "X-VX-Engine": ENGINE_NAME,
+      },
+    });
+  }
+
+  // Pass-through: validate the first bytes, then stream with byte ranges.
+  const opened = await DownloadResolver.openAndValidate(source, { timeoutMs, sniffBytes: 65536 });
+
+  if (opened.isStream) {
+    try { await opened.reader.cancel(); } catch {}
+    return streamHls(source, filename, timeoutMs);
+  }
+
+  const finalName = filename.replace(/\.[^.]+$/, "") + "." + opened.realExtension;
+  const headers = new Headers();
+  headers.set("Content-Type", opened.realMime);
+  headers.set("Content-Disposition", asciiContentDisposition(finalName));
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "no-store");
+  headers.set("X-VX-Engine", ENGINE_NAME);
+
+  const upstreamLength = opened.response.headers.get("content-length");
+  const upstreamRange = opened.response.headers.get("content-range");
+  if (upstreamRange) headers.set("Content-Range", upstreamRange);
+  if (upstreamLength) headers.set("Content-Length", upstreamLength);
+
+  const reader = opened.reader;
+  const firstChunk = opened.firstChunk;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(firstChunk);
+      (function pump() {
+        reader
+          .read()
+          .then(({ done, value }) => {
+            if (done) return controller.close();
+            if (value && value.length) controller.enqueue(value);
+            pump();
+          })
+          .catch((e) => controller.error(e));
+      })();
+    },
+    cancel() {
+      try { reader.cancel(); } catch {}
+    },
   });
 
-  // If 403, retry with playlist domain as Referer
-  if (res.status === 403) {
-    try {
-      const urlObj = new URL(masterUrl);
-      const altHeaders = { ...fetchHeaders, Referer: urlObj.origin + "/", Origin: urlObj.origin };
-      const retryRes = await fetch(masterUrl, {
-        headers: altHeaders,
-        signal: AbortSignal.timeout(30000),
-      });
-      if (retryRes.ok) {
-        res = retryRes;
-        fetchHeaders = altHeaders;
-      }
-    } catch {}
-  }
+  return new Response(stream, {
+    status: request.headers.get("range") && opened.status === 206 ? 206 : 200,
+    headers,
+  });
+}
 
-  if (!res.ok) {
-    throw new Error(`HLS playlist fetch failed with HTTP ${res.status}`);
-  }
+/** Assemble an HLS stream into a single .mp4 response by concatenating TS/MP4 segments. */
+async function streamHls(
+  source: Awaited<ReturnType<typeof DownloadResolver.resolveSource>>,
+  filename: string,
+  timeoutMs: number,
+): Promise<Response> {
+  const plan = await HlsFetcher.plan(source.url, source.headers, timeoutMs);
+  const finalName = filename.replace(/\.[^.]+$/, "") + ".mp4";
 
-  let text = await res.text();
-  let playlistUrl = masterUrl;
+  const headers = new Headers();
+  headers.set("Content-Type", "video/mp4");
+  headers.set("Content-Disposition", asciiContentDisposition(finalName));
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "no-store");
+  headers.set("X-VX-Engine", ENGINE_NAME);
 
-  // If master playlist with multiple variant streams, choose the best quality stream
-  if (text.includes("#EXT-X-STREAM-INF")) {
-    const lines = text.split("\n");
-    let bestUrl = "";
-    let maxBw = 0;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.startsWith("#EXT-X-STREAM-INF")) {
-        const bwMatch = /BANDWIDTH=(\d+)/i.exec(line);
-        const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
-        const nextLine = (lines[i + 1] || "").trim();
-        if (nextLine && !nextLine.startsWith("#")) {
-          if (bw >= maxBw || !bestUrl) {
-            maxBw = bw;
-            try {
-              bestUrl = new URL(nextLine, masterUrl).toString();
-            } catch {}
-          }
-        }
-      }
-    }
-
-    if (bestUrl) {
-      playlistUrl = bestUrl;
-      const subRes = await fetch(playlistUrl, {
-        headers: fetchHeaders,
-        signal: AbortSignal.timeout(30000),
-      });
-      if (subRes.ok) {
-        text = await subRes.text();
-      }
-    }
-  }
-
-  // Extract all segment URLs from media playlist
-  const lines = text.split("\n");
-  const segmentUrls: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line && !line.startsWith("#")) {
-      try {
-        const absSegment = new URL(line, playlistUrl).toString();
-        segmentUrls.push(absSegment);
-      } catch {}
-    }
-  }
-
-  if (segmentUrls.length === 0) {
-    throw new Error("No media segments found in HLS stream playlist");
-  }
-
-  const baseName = filename.replace(/\.[^.]+$/, "");
-  const finalFilename = `${baseName}.mp4`;
-  const safeFilename = finalFilename.replace(/[^\x20-\x7e]/g, "_");
-
-  const respHeaders = new Headers();
-  respHeaders.set("Content-Type", "video/mp4");
-  respHeaders.set(
-    "Content-Disposition",
-    `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(finalFilename)}`,
-  );
-  respHeaders.set("Cache-Control", "no-store");
-  respHeaders.set("Accept-Ranges", "bytes");
+  const fetchHeaders = { "User-Agent": BROWSER_USER_AGENT, Accept: "*/*", ...source.headers };
+  let sawBytes = false;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for (const segUrl of segmentUrls) {
-          let segRes = await fetch(segUrl, {
-            headers: fetchHeaders,
-            signal: AbortSignal.timeout(30000),
-          });
-          if (!segRes.ok && segRes.status === 403) {
+        for (const segUrl of plan.segmentUrls) {
+          if (!SecurityGuard.isUrlSafe(segUrl).safe) continue;
+          let segRes = await fetch(segUrl, { headers: fetchHeaders, signal: AbortSignal.timeout(timeoutMs) }).catch(() => null);
+          if (segRes && segRes.status === 403) {
             try {
-              const segObj = new URL(segUrl);
-              segRes = await fetch(segUrl, {
-                headers: { ...fetchHeaders, Referer: segObj.origin + "/", Origin: segObj.origin },
-                signal: AbortSignal.timeout(30000),
-              });
+              const origin = new URL(segUrl).origin;
+              segRes = await fetch(segUrl, { headers: { ...fetchHeaders, Referer: origin + "/", Origin: origin }, signal: AbortSignal.timeout(timeoutMs) });
             } catch {}
           }
-          if (segRes.ok && segRes.body) {
-            const reader = segRes.body.getReader();
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (value && value.length > 0) {
-                controller.enqueue(value);
-              }
+          if (!segRes || !segRes.ok || !segRes.body) continue;
+          const reader = segRes.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.length) {
+              sawBytes = true;
+              controller.enqueue(value);
             }
           }
+        }
+        if (!sawBytes) {
+          controller.error(new EngineError("MEDIA_VALIDATION_FAILED", "No HLS segments could be downloaded"));
+          return;
         }
         controller.close();
       } catch (err) {
@@ -171,252 +155,223 @@ async function streamHlsSegments(
     },
   });
 
-  return new Response(stream, {
-    status: 200,
-    headers: respHeaders,
-  });
+  return new Response(stream, { status: 200, headers });
 }
 
 /**
- * Proxy an HTTPS media URL through the server.
- * Handles direct media streams and HLS (.m3u8) playlists.
+ * Stream media through a yt-dlp subprocess pipe. yt-dlp fetches with the
+ * correct signing/headers and muxes separate video+audio streams itself.
+ * We validate the first bytes so an error page is never saved as media, and
+ * (when converting) buffer the pipe output then transcode with ffmpeg.
  */
-async function proxyUrl(
-  mediaUrl: string,
-  rangeHeader: string | null,
+async function streamViaYtdlp(
+  plan: YtdlpPipePlan,
+  sourceUrl: string,
   filename: string,
-  hintMime: string,
-  extraHeaders: Record<string, string> = {},
+  convertTo: ConvertTarget | null,
+  timeoutMs: number,
 ): Promise<Response> {
-  const fetchHeaders: Record<string, string> = { ...BROWSER_HEADERS, ...extraHeaders };
-  if (rangeHeader) fetchHeaders["Range"] = rangeHeader;
+  const proc = ytdlpStream(sourceUrl, plan.selector, { mergeContainer: plan.mergeContainer, timeoutMs });
+  const stdout = proc.stdout as NodeJS.ReadableStream & AsyncIterable<Buffer>;
 
-  // Check if target is directly known as HLS (.m3u8)
-  const isHls =
-    mediaUrl.toLowerCase().includes(".m3u8") ||
-    hintMime.toLowerCase().includes("mpegurl");
+  const iterator = stdout[Symbol.asyncIterator]();
 
-  if (isHls) {
-    return streamHlsSegments(mediaUrl, fetchHeaders, filename);
+  // Read the first chunk for validation.
+  const first = await iterator.next();
+  if (first.done || !first.value || first.value.length === 0) {
+    proc.kill();
+    const stderr = proc.stderr();
+    // Give the user an actionable message rather than the raw yt-dlp noise.
+    if (/HTTP Error 403|403: Forbidden|Sign in to confirm|not a bot/i.test(stderr)) {
+      throw new EngineError(
+        "MEDIA_NOT_PUBLIC",
+        "The platform (e.g. YouTube) refused the stream request from this server (HTTP 403). This is typically an anti-bot/geo restriction. Try a different public source, or run VX Converter on a host with an up-to-date extractor and network access.",
+      );
+    }
+    throw new EngineError("SOURCE_FETCH_FAILED", `The platform extractor produced no data. ${stderr.slice(-160).trim()}`);
+  }
+  const firstChunk = Buffer.from(first.value);
+  const sniff = MediaSniffer.sniff(firstChunk.subarray(0, Math.min(firstChunk.length, 4096)));
+  if (sniff.isHtmlOrJson) {
+    proc.kill();
+    throw new EngineError("MEDIA_VALIDATION_FAILED", "Source returned a web page or error instead of media");
   }
 
-  const upstream = await fetch(mediaUrl, {
-    headers: fetchHeaders,
-    redirect: "follow",
-    signal: AbortSignal.timeout(60000),
-  });
-
-  if (!upstream.ok || !upstream.body) {
-    throw new Error(`Upstream ${upstream.status}: ${upstream.statusText}`);
+  // Conversion path: buffer everything (yt-dlp already validated first chunk).
+  if (convertTo) {
+    if (!(await FfmpegAdapter.isAvailable())) {
+      proc.kill();
+      throw new EngineError("CONVERSION_UNAVAILABLE", "Conversion requires ffmpeg, which is not available in this environment.");
+    }
+    const chunks: Buffer[] = [firstChunk];
+    let total = firstChunk.length;
+    const MAX = 512 * 1024 * 1024;
+    while (true) {
+      const { done, value } = await iterator.next();
+      if (done) break;
+      if (value && value.length) {
+        total += value.length;
+        if (total > MAX) { proc.kill(); throw new EngineError("MEDIA_VALIDATION_FAILED", "Media too large to convert in this environment"); }
+        chunks.push(Buffer.from(value));
+      }
+    }
+    const inputExt = sniff.extension && sniff.extension !== "bin" ? sniff.extension : plan.hintExtension;
+    const out = await DownloadResolver.convertBuffer(Buffer.concat(chunks), inputExt, convertTo, timeoutMs);
+    const finalName = filename.replace(/\.[^.]+$/, "") + "." + out.extension;
+    return new Response(new Uint8Array(out.buffer), {
+      status: 200,
+      headers: {
+        "Content-Type": out.mime,
+        "Content-Length": String(out.buffer.length),
+        "Content-Disposition": asciiContentDisposition(finalName),
+        "Cache-Control": "no-store",
+        "X-VX-Engine": ENGINE_NAME,
+      },
+    });
   }
 
-  const reader = upstream.body.getReader();
-  const { done, value: firstChunk } = await reader.read();
+  // Pass-through: stream the rest of the pipe.
+  const realExt = MediaSniffer.isKnownMedia(sniff.format) ? sniff.extension : plan.hintExtension;
+  const realMime = MediaSniffer.isKnownMedia(sniff.format) ? sniff.mime : plan.hintMime;
+  const finalName = filename.replace(/\.[^.]+$/, "") + "." + realExt;
 
-  if (done || !firstChunk?.length) {
-    throw new Error("Upstream returned empty stream");
-  }
-
-  const chunkVal = MediaValidator.validateChunk(firstChunk);
-
-  // If first chunk indicates HLS playlist, switch to HLS segment assembler
-  if (chunkVal.format === "m3u8") {
-    return streamHlsSegments(mediaUrl, fetchHeaders, filename);
-  }
-
-  if (chunkVal.isHtmlOrJson) {
-    const preview = Buffer.from(firstChunk).slice(0, 120).toString("utf8");
-    throw new Error(`Source returned page/error instead of media: ${preview.slice(0, 60)}`);
-  }
-
-  const detectedMime = chunkVal.mime || hintMime || "application/octet-stream";
-  const detectedExt = chunkVal.extension || MimeDetector.resolve(mediaUrl, hintMime).extension || "mp4";
-  const baseName = filename.replace(/\.[^.]+$/, "");
-  const finalFilename = `${baseName}.${detectedExt}`;
-  const safeFilename = finalFilename.replace(/[^\x20-\x7e]/g, "_");
-
-  const respHeaders = new Headers();
-  respHeaders.set("Content-Type", detectedMime);
-  respHeaders.set(
-    "Content-Disposition",
-    `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(finalFilename)}`,
-  );
-  respHeaders.set("Accept-Ranges", "bytes");
-  respHeaders.set("Cache-Control", "no-store");
-
-  const cl = upstream.headers.get("content-length");
-  if (cl) respHeaders.set("Content-Length", cl);
-  const cr = upstream.headers.get("content-range");
-  if (cr) respHeaders.set("Content-Range", cr);
+  const headers = new Headers();
+  headers.set("Content-Type", realMime);
+  headers.set("Content-Disposition", asciiContentDisposition(finalName));
+  headers.set("Cache-Control", "no-store");
+  headers.set("X-VX-Engine", ENGINE_NAME);
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(firstChunk);
-      function pump() {
-        reader
-          .read()
-          .then(({ done: d, value }) => {
-            if (d) {
-              controller.close();
-              return;
-            }
-            if (value && value.length > 0) {
-              controller.enqueue(value);
-            }
-            pump();
-          })
-          .catch((e) => controller.error(e));
-      }
-      pump();
+      controller.enqueue(new Uint8Array(firstChunk));
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await iterator.next();
+            if (done) break;
+            if (value && value.length) controller.enqueue(new Uint8Array(value));
+          }
+          controller.close();
+        } catch (e) {
+          controller.error(e);
+        }
+      })();
     },
     cancel() {
-      reader.cancel();
+      proc.kill();
     },
   });
 
-  return new Response(stream, {
-    status: upstream.status === 206 ? 206 : 200,
-    headers: respHeaders,
-  });
+  return new Response(stream, { status: 200, headers });
 }
 
 async function handleDownload(
-  mediaId: string,
+  media: MediaCandidate,
   request: Request,
-  passedMedia?: MediaCandidate,
+  convertTo: ConvertTarget | null,
+  filenameOverride?: string,
 ): Promise<Response> {
-  const media = passedMedia || (mediaId ? getMediaById(mediaId) : undefined);
-  if (!media) {
-    return NextResponse.json(
-      { ok: false, error: { code: "MEDIA_NOT_FOUND", message: "Media details not found. Please re-inspect the URL." } },
-      { status: 404 },
-    );
-  }
-
-  if (media.kind === "stream" && media.is_direct === false && !media.media_url) {
-    return NextResponse.json(
-      { ok: false, error: { code: "NOT_DOWNLOADABLE", message: "Embed player only — not directly downloadable." } },
-      { status: 422 },
-    );
-  }
-
-  const filename = sanitizeFilename(media.title, media.quality, media.extension);
-  const rangeHeader = request.headers.get("range");
-
   try {
-    // --- Path A: Platform URL (YouTube, TikTok, etc.) ---
-    if (needsYtdlp(media.source_url)) {
-      try {
-        const formats = await ytdlpGetFormats(media.source_url);
-        if (formats.length) {
-          const kind = media.kind === "audio" ? "audio" : "video";
-          let chosen = formats.find((f) => f.kind === kind && f.quality === media.quality);
-          if (!chosen) chosen = formats.find((f) => f.kind === kind);
-          if (!chosen) chosen = formats[0];
-
-          const ext = chosen.ext || media.extension;
-          const finalFilename = sanitizeFilename(media.title, chosen.quality, ext);
-
-          return await proxyUrl(chosen.url, rangeHeader, finalFilename, media.mime, {
-            Referer: "https://www.youtube.com/",
-            Origin: "https://www.youtube.com",
-          });
-        }
-      } catch (ytdlpErr) {
-        if (!media.media_url || !media.is_direct) {
-          throw ytdlpErr;
-        }
-      }
+    if (!media.media_url && !media.source_url) {
+      throw new EngineError("MEDIA_NOT_FOUND", "Candidate has no media URL");
+    }
+    if (media.kind === "stream" && media.is_direct === false && !media.media_url) {
+      throw new EngineError("UNSUPPORTED_SOURCE", "This is an embed player, not directly downloadable");
     }
 
-    // --- Path B: Direct / HLS URL ---
-    const validation = SecurityGuard.isUrlSafe(media.media_url);
-    if (!validation.safe || !validation.parsed) {
-      return NextResponse.json(
-        { ok: false, error: { code: "SSRF_BLOCKED", message: "Blocked: private or unsafe destination." } },
-        { status: 403 },
-      );
+    const filename = filenameOverride || forgeDownloadName(media.title, media.quality, media.extension);
+    const timeoutMs = convertTo ? 240000 : 120000;
+
+    const plan = await DownloadResolver.planDownload(media, { convertTo });
+    if (plan.kind === "ytdlp-pipe") {
+      return await streamViaYtdlp(plan, media.source_url, filename, convertTo, timeoutMs);
     }
 
-    const extraHeaders: Record<string, string> = {};
-    if (media.source_url) {
-      try {
-        const srcUrl = new URL(media.source_url);
-        extraHeaders["Referer"] = media.source_url;
-        extraHeaders["Origin"] = srcUrl.origin;
-      } catch {}
-    }
-
-    return await proxyUrl(validation.parsed.toString(), rangeHeader, filename, media.mime, extraHeaders);
-  } catch (err: any) {
-    const msg: string = err?.message || "Download failed";
-    const isTimeout = err?.name === "TimeoutError" || msg.includes("timed out");
-    return NextResponse.json(
-      { ok: false, error: { code: isTimeout ? "TIMEOUT" : "UPSTREAM_ERROR", message: msg } },
-      { status: 502 },
-    );
+    // Direct plan — reuse the validate+stream path.
+    const source = {
+      url: (plan as DirectPlan).url,
+      headers: (plan as DirectPlan).headers,
+      hintMime: (plan as DirectPlan).hintMime,
+      hintExtension: (plan as DirectPlan).hintExtension,
+      title: (plan as DirectPlan).title,
+      quality: (plan as DirectPlan).quality,
+    };
+    return await streamDirect(source, request, filename, convertTo, timeoutMs);
+  } catch (err) {
+    return errorResponse(err);
   }
+}
+
+function buildPassedMedia(params: URLSearchParams): MediaCandidate {
+  const mediaUrl = params.get("media_url")!.trim();
+  const mime = params.get("mime")?.trim() || "";
+  const kindParam = params.get("kind")?.trim();
+  return {
+    id: params.get("media_id")?.trim() || crypto.randomUUID(),
+    title: params.get("title")?.trim() || "vx-media",
+    source_url: params.get("source_url")?.trim() || mediaUrl,
+    media_url: mediaUrl,
+    thumbnail_url: null,
+    mime: mime || "application/octet-stream",
+    extension: params.get("extension")?.trim() || "bin",
+    width: null,
+    height: null,
+    duration: null,
+    filesize: null,
+    quality: params.get("quality")?.trim() || "source",
+    kind: kindParam || (mime.startsWith("audio/") ? "audio" : mime.includes("mpegurl") ? "stream" : "video"),
+    playable: true,
+    is_direct: true,
+  };
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const mediaId = searchParams.get("media_id")?.trim() || "";
   const mediaUrl = searchParams.get("media_url")?.trim();
-  const sourceUrl = searchParams.get("source_url")?.trim();
-  const title = searchParams.get("title")?.trim();
-  const mime = searchParams.get("mime")?.trim();
-  const quality = searchParams.get("quality")?.trim();
-  const extension = searchParams.get("extension")?.trim();
+  const convertRaw = searchParams.get("convert")?.trim().toLowerCase() || "";
+  const convertTo = VALID_TARGETS.includes(convertRaw as ConvertTarget) ? (convertRaw as ConvertTarget) : null;
 
-  let passedMedia: MediaCandidate | undefined;
+  let media: MediaCandidate | undefined;
   if (mediaUrl) {
-    passedMedia = {
-      id: mediaId || crypto.randomUUID(),
-      title: title || "vx-media",
-      source_url: sourceUrl || mediaUrl,
-      media_url: mediaUrl,
-      thumbnail_url: null,
-      mime: mime || "video/mp4",
-      extension: extension || "mp4",
-      width: null,
-      height: null,
-      duration: null,
-      filesize: null,
-      quality: quality || "source",
-      kind: mime?.startsWith("audio/") ? "audio" : "video",
-      playable: true,
-      is_direct: true,
-    };
+    media = buildPassedMedia(searchParams);
+  } else if (mediaId) {
+    media = getMediaById(mediaId);
   }
 
-  if (!mediaId && !passedMedia) {
+  if (!media) {
     return NextResponse.json(
-      { ok: false, error: { code: "BAD_REQUEST", message: "media_id or media_url required" } },
-      { status: 400 },
+      { ok: false, engine: ENGINE_NAME, error: { code: "MEDIA_NOT_FOUND", message: "Re-inspect the URL to obtain media details." } },
+      { status: 404 },
     );
   }
-  return handleDownload(mediaId, request, passedMedia);
+
+  return handleDownload(media, request, convertTo, searchParams.get("filename")?.trim() || undefined);
 }
 
 export async function POST(request: Request) {
-  let body: { media_id?: string; media?: MediaCandidate };
+  let body: { media_id?: string; media?: MediaCandidate; convert?: string; filename?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json(
-      { ok: false, error: { code: "BAD_REQUEST", message: "Invalid JSON" } },
+      { ok: false, engine: ENGINE_NAME, error: { code: "BAD_REQUEST", message: "Invalid JSON body" } },
       { status: 400 },
     );
   }
+
+  const convertRaw = (body.convert || "").toLowerCase();
+  const convertTo = VALID_TARGETS.includes(convertRaw as ConvertTarget) ? (convertRaw as ConvertTarget) : null;
 
   const mediaId = typeof body.media_id === "string" ? body.media_id.trim() : body.media?.id || "";
-  const passedMedia = body.media && typeof body.media === "object" ? body.media : undefined;
+  const media = body.media && typeof body.media === "object" ? body.media : mediaId ? getMediaById(mediaId) : undefined;
 
-  if (!mediaId && !passedMedia) {
+  if (!media) {
     return NextResponse.json(
-      { ok: false, error: { code: "BAD_REQUEST", message: "media_id or media details required" } },
-      { status: 400 },
+      { ok: false, engine: ENGINE_NAME, error: { code: "MEDIA_NOT_FOUND", message: "Re-inspect the URL to obtain media details." } },
+      { status: 404 },
     );
   }
-  return handleDownload(mediaId, request, passedMedia);
+
+  return handleDownload(media, request, convertTo, body.filename);
 }

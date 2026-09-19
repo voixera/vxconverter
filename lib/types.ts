@@ -14,6 +14,9 @@ export interface MediaCandidate {
   kind: "video" | "audio" | "stream" | "image" | string;
   playable?: boolean;
   is_direct?: boolean;
+  /** Engine V4 VX metadata */
+  source?: string;
+  platform?: string | null;
 }
 
 export interface ScanResult {
@@ -26,6 +29,8 @@ export interface ScanResult {
   engine?: string;
   cached: boolean;
   created_at: string;
+  trace?: { stage: string; ok: boolean; detail?: string }[];
+  engine_version?: string;
 }
 
 export interface ApiError {

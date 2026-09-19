@@ -1,9 +1,10 @@
 import { EngineContext, ExtractorResult, V4Extractor } from "../types";
-import { MimeDetector } from "../mime";
+import { ResilientFetcher } from "../fetcher";
+import { CandidateFactory, dedupeCandidates } from "../candidate";
 import type { MediaCandidate } from "../../types";
 
 /**
- * Engine V4 VX - HTML5 Media Extractor (<video>, <audio>, <source>)
+ * ENGINE V4 VX - HTML5 Media Extractor (<video>, <audio>, <source>)
  */
 export class HTML5Extractor implements V4Extractor {
   public name = "HTML5Extractor";
@@ -14,69 +15,48 @@ export class HTML5Extractor implements V4Extractor {
 
   public static parseHtml(html: string, base: URL): MediaCandidate[] {
     const media: MediaCandidate[] = [];
-    const seen = new Set<string>();
-
     const pageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() || "Discovered Media";
-    const posterGlobal = html.match(/<video[^>]+poster=["']([^"']+)["']/i)?.[1];
-    let globalThumbnail: string | null = null;
-    if (posterGlobal) {
-      try {
-        globalThumbnail = new URL(posterGlobal, base).toString();
-      } catch {}
+
+    const poster = html.match(/<video[^>]+poster=["']([^"']+)["']/i)?.[1];
+    let thumbnail: string | null = null;
+    if (poster) {
+      try { thumbnail = new URL(poster, base).toString(); } catch {}
     }
 
-    const tagPattern = /<(video|audio|source)[^>]+(?:src|data-src|data-video|data-url)=["']([^"']+)["'][^>]*>/gi;
+    const tagPattern = /<(video|audio|source|embed)[^>]*?(?:src|data-src|data-video|data-url|data-file)=["']([^"']+)["'][^>]*>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = tagPattern.exec(html))) {
       const tag = match[1].toLowerCase();
-      const rawUrl = match[2];
-      let absUrl: string;
-      try {
-        absUrl = new URL(rawUrl, base).toString();
-      } catch {
-        continue;
-      }
+      const raw = match[2];
+      if (!raw || raw.startsWith("data:") || raw.startsWith("blob:")) continue;
 
-      if (!seen.has(absUrl)) {
-        seen.add(absUrl);
-        const typeMatch = match[0].match(/type=["']([^"']+)["']/i);
-        const declaredType = typeMatch ? typeMatch[1] : tag === "audio" ? "audio/mpeg" : "video/mp4";
-        const mimeInfo = MimeDetector.resolve(absUrl, declaredType);
+      let abs: string;
+      try { abs = new URL(raw, base).toString(); } catch { continue; }
 
-        media.push({
-          id: crypto.randomUUID(),
+      const typeMatch = match[0].match(/type=["']([^"']+)["']/i);
+      const declared = typeMatch ? typeMatch[1] : undefined;
+
+      media.push(
+        CandidateFactory.make({
+          url: abs,
           title: pageTitle,
-          source_url: base.toString(),
-          media_url: absUrl,
-          thumbnail_url: globalThumbnail,
-          mime: mimeInfo.mime,
-          extension: mimeInfo.extension,
-          width: null,
-          height: null,
-          duration: null,
-          filesize: null,
-          quality: "source",
-          kind: mimeInfo.kind,
-          playable: mimeInfo.playable,
-          is_direct: true,
-        });
-      }
+          sourceUrl: base.toString(),
+          thumbnail,
+          mime: declared,
+          source: "html5",
+          platform: base.hostname,
+        }),
+      );
     }
 
-    return media;
+    return dedupeCandidates(media);
   }
 
   public async extract(ctx: EngineContext): Promise<ExtractorResult | null> {
-    const res = await fetch(ctx.rawUrl, {
-      headers: { "User-Agent": ctx.userAgent },
-      signal: AbortSignal.timeout(ctx.timeoutMs),
-    }).catch(() => null);
-
-    if (!res || !res.ok) return null;
-    const html = await res.text().catch(() => "");
-    const media = HTML5Extractor.parseHtml(html, ctx.url);
-
-    return media.length ? { handled: true, provider: ctx.url.hostname, media } : null;
+    const fetchRes = await ResilientFetcher.fetch(ctx.url, ctx.timeoutMs, ctx.timeoutMs ? 15 * 1024 * 1024 : undefined);
+    if (!fetchRes.html) return null;
+    const media = HTML5Extractor.parseHtml(fetchRes.html, fetchRes.finalUrl);
+    return media.length ? { handled: true, provider: fetchRes.finalUrl.hostname, media } : null;
   }
 }
